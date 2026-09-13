@@ -1,0 +1,17 @@
+[Unit]
+Description=Argos Monitoring
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/argos
+# --enable-native-access: sqlite-jdbc loads native code; JDK 25 warns, later JDKs refuse without it
+# -Xmx256m: plenty for Argos, prevents the JVM from claiming 1/4 of the host RAM
+ExecStart=/usr/bin/java --enable-native-access=ALL-UNNAMED -Xmx256m -jar /opt/argos/argos.jar configPath=/opt/argos/config.json
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
