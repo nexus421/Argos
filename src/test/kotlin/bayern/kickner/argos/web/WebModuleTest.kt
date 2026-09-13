@@ -6,7 +6,9 @@ import bayern.kickner.argos.config.ConfigError
 import bayern.kickner.argos.config.MonitorConfig
 import bayern.kickner.argos.config.StatusPageConfig
 import bayern.kickner.argos.config.TcpCheckConfig
+import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -15,6 +17,7 @@ import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
+import java.net.URI
 import java.time.Instant
 
 private val config = AppConfig(
@@ -111,6 +114,24 @@ class WebModuleTest : FunSpec({
             root.bodyAsText() shouldContain "intervalSeconds must be positive"
             client.get("/setup").status shouldBe HttpStatusCode.OK
             client.get("/status/public").status shouldBe HttpStatusCode.NotFound
+        }
+    }
+
+    test("every script and stylesheet the setup page references resolves from /setup, with and without a config") {
+        listOf(config, null).forEach { current ->
+            testApplication {
+                application { configureWeb(current, statusSource) }
+
+                val html = client.get("/setup").bodyAsText()
+                val references = Regex("""(?:src|href)="([^"]+)"""").findAll(html).map { it.groupValues[1] }.toList()
+                references shouldContain "/setup/config-model.js"
+                references shouldContain "/setup/editor.js"
+                references shouldContain "/setup/editor.css"
+                references.forEach { reference ->
+                    val resolved = URI("http://localhost/setup").resolve(reference).path
+                    withClue("$reference resolved from /setup as $resolved") { client.get(resolved).status shouldBe HttpStatusCode.OK }
+                }
+            }
         }
     }
 

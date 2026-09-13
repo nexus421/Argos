@@ -1,207 +1,70 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Argos Config-Generator</title>
-<style>
-  body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; background: #1e1e1e; color: #ddd; }
-  fieldset { margin-bottom: 1rem; border-color: #444; }
-  input, select, textarea { width: 100%; margin: 0.25rem 0; background: #2a2a2a; color: #ddd; border: 1px solid #555; box-sizing: border-box; }
-  input[type=checkbox] { width: auto; }
-  button { margin-top: 0.5rem; padding: 0.5rem 1rem; background: #333; color: #fff; border: 1px solid #555; cursor: pointer; }
-  button:hover { background: #444; }
-  #output { width: 100%; height: 300px; }
-  .hint { color: #999; font-size: 0.9em; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Argos Configuration Editor</title>
+<link rel="stylesheet" href="/setup/editor.css">
 </head>
 <body>
-<h1>Argos Config-Generator</h1>
-<p class="hint">Bestehende config.json laden, Monitore bearbeiten, JSON erzeugen. Kanäle, Status-Pages und weitere Felder einer geladenen Datei bleiben unverändert erhalten.</p>
+<header>
+  <h1>Argos Configuration Editor</h1>
+  <p class="lead">Build or edit a <code>config.json</code> without reading the docs. Everything happens in your browser: nothing is read from or written to the Argos server. Download the result, place it next to Argos and restart the service.</p>
+  <p class="toolbar">
+    <label class="button">Load config.json <input type="file" id="upload" accept="application/json,.json" hidden></label>
+    <button type="button" id="reset">Start from scratch</button>
+    <span id="fileStatus" class="muted"></span>
+  </p>
+</header>
 
-<input type="file" id="upload" accept="application/json">
+<main>
+  <section id="monitors">
+    <h2>Monitors</h2>
+    <p class="muted">What Argos checks. HTTP(S), TCP port, ping or DNS resolution.</p>
+    <div class="cards"></div>
+    <button type="button" data-add="monitor">+ Add monitor</button>
+  </section>
 
-<div id="monitors"></div>
-<button id="addMonitor">+ Monitor hinzufügen</button>
+  <section id="smtpChannels">
+    <h2>E-mail channels (SMTP)</h2>
+    <p class="muted">Alerts by mail. Each channel is one SMTP account with one or more recipients.</p>
+    <div class="cards"></div>
+    <button type="button" data-add="smtp">+ Add SMTP channel</button>
+  </section>
 
-<fieldset>
-  <legend>Globale Einstellungen</legend>
-  <label>Retention (Tage): <input type="number" id="retentionDays" value="365"></label>
-  <label>Flapping-Schwelle: <input type="number" id="flappingThreshold" value="3"></label>
-  <label>Heartbeat-Gap-Schwelle (Minuten): <input type="number" id="heartbeatGapMinutesThreshold" value="2"></label>
-</fieldset>
+  <section id="webhookChannels">
+    <h2>Webhook channels</h2>
+    <p class="muted">Alerts as HTTP requests, e.g. to Slack, Mattermost, ntfy or a custom endpoint.</p>
+    <div class="cards"></div>
+    <button type="button" data-add="webhook">+ Add webhook channel</button>
+  </section>
 
-<button id="generate">JSON generieren</button>
-<textarea id="output" readonly></textarea>
-<button id="download">Als Datei herunterladen</button>
+  <section id="statusPages">
+    <h2>Status pages</h2>
+    <p class="muted">Public or password-protected pages under <code>/status/&lt;id&gt;</code> showing the state of selected monitors.</p>
+    <div class="cards"></div>
+    <button type="button" data-add="page">+ Add status page</button>
+  </section>
 
-<script>
-// Everything from a loaded file that this form does not edit (channels, status pages, dataDir, web*, ...)
-let passthrough = { smtpChannels: [], webhookChannels: [], statusPages: [] };
-// Original monitor objects per form, so IDs and fields without a form control (headers, notificationChannelIds) survive a round trip
-const originals = new WeakMap();
+  <section id="general">
+    <h2>General settings</h2>
+    <div class="card" id="generalFields"></div>
+  </section>
 
-function esc(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+  <section id="output">
+    <h2>Result</h2>
+    <div id="issues"></div>
+    <textarea id="json" readonly spellcheck="false" aria-label="Generated config.json"></textarea>
+    <p class="toolbar">
+      <button type="button" id="download" disabled>Download config.json</button>
+      <button type="button" id="copy" disabled>Copy JSON</button>
+      <span id="copyStatus" class="muted"></span>
+    </p>
+    <p class="muted">The file contains SMTP passwords and tokens in plain text: keep it out of version control and restrict it with <code>chmod 600</code>. Argos reads it from <code>./config.json</code> or the path given as <code>configPath=…</code>; changes take effect after a restart.</p>
+  </section>
+</main>
 
-// crypto.randomUUID only exists in secure contexts (https/localhost); plain http on a server needs the fallback
-function newId() {
-  if (window.crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-  return 'm-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
-}
-
-function toInt(value, fallback) {
-  const parsed = parseInt(value, 10);
-  return Number.isNaN(parsed) ? fallback : parsed;
-}
-
-function addMonitorForm(prefill) {
-  const container = document.getElementById('monitors');
-  const div = document.createElement('div');
-  div.className = 'monitor';
-  if (prefill) originals.set(div, prefill);
-  div.innerHTML = `
-    <fieldset>
-      <legend>Monitor</legend>
-      <label>Name: <input class="name" value="${esc(prefill?.name)}"></label>
-      <label>Intervall (Sekunden): <input class="interval" type="number" value="${esc(prefill?.intervalSeconds ?? 60)}"></label>
-      <label>Timeout (Sekunden): <input class="timeout" type="number" value="${esc(prefill?.timeoutSeconds ?? 10)}"></label>
-      <label>Check-Typ:
-        <select class="checkType">
-          <option value="http">HTTP(S)</option>
-          <option value="tcp">TCP</option>
-          <option value="ping">Ping</option>
-          <option value="dns">DNS</option>
-        </select>
-      </label>
-      <div class="checkFields"></div>
-      <button class="remove" type="button">Entfernen</button>
-    </fieldset>
-  `;
-  container.appendChild(div);
-
-  const select = div.querySelector('.checkType');
-  const fieldsDiv = div.querySelector('.checkFields');
-
-  if (prefill?.check?.type) {
-    select.value = prefill.check.type;
-  }
-
-  function renderFields() {
-    const type = select.value;
-    const check = prefill?.check?.type === type ? prefill.check : null;
-    if (type === 'http') {
-      fieldsDiv.innerHTML = `
-        <label>URL: <input class="url" value="${esc(check?.url)}"></label>
-        <label>Methode: <input class="method" value="${esc(check?.method ?? 'GET')}"></label>
-        <label>Erwartete Status-Codes (kommasepariert): <input class="statusCodes" value="${esc((check?.expectedStatusCodes ?? [200]).join(','))}"></label>
-        <label>Body-Regex (optional): <input class="bodyRegex" value="${esc(check?.bodyRegex)}"></label>
-        <label>Redirects folgen: <input class="followRedirects" type="checkbox" ${check?.followRedirects !== false ? 'checked' : ''}></label>
-      `;
-    } else if (type === 'tcp') {
-      fieldsDiv.innerHTML = `
-        <label>Host: <input class="host" value="${esc(check?.host)}"></label>
-        <label>Port: <input class="port" type="number" value="${esc(check?.port)}"></label>
-      `;
-    } else if (type === 'ping') {
-      fieldsDiv.innerHTML = `<label>Host: <input class="host" value="${esc(check?.host)}"></label>`;
-    } else if (type === 'dns') {
-      fieldsDiv.innerHTML = `
-        <label>Hostname: <input class="hostname" value="${esc(check?.hostname)}"></label>
-        <label>Erwartete IP (optional): <input class="expectedIp" value="${esc(check?.expectedIp)}"></label>
-      `;
-    }
-  }
-  select.addEventListener('change', renderFields);
-  renderFields();
-
-  div.querySelector('.remove').addEventListener('click', () => div.remove());
-}
-
-function collectMonitor(div) {
-  const original = originals.get(div) ?? {};
-  const type = div.querySelector('.checkType').value;
-  const originalCheck = original.check?.type === type ? original.check : {};
-  let check;
-  if (type === 'http') {
-    check = {
-      ...originalCheck,
-      type: 'http',
-      url: div.querySelector('.url').value,
-      method: div.querySelector('.method').value || 'GET',
-      expectedStatusCodes: div.querySelector('.statusCodes').value.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !Number.isNaN(n)),
-      bodyRegex: div.querySelector('.bodyRegex').value || null,
-      followRedirects: div.querySelector('.followRedirects').checked
-    };
-  } else if (type === 'tcp') {
-    check = { ...originalCheck, type: 'tcp', host: div.querySelector('.host').value, port: toInt(div.querySelector('.port').value, 0) };
-  } else if (type === 'ping') {
-    check = { ...originalCheck, type: 'ping', host: div.querySelector('.host').value };
-  } else {
-    check = {
-      ...originalCheck,
-      type: 'dns',
-      hostname: div.querySelector('.hostname').value,
-      expectedIp: div.querySelector('.expectedIp').value || null
-    };
-  }
-
-  return {
-    ...original,
-    id: original.id ?? newId(),
-    name: div.querySelector('.name').value,
-    intervalSeconds: toInt(div.querySelector('.interval').value, 60),
-    timeoutSeconds: toInt(div.querySelector('.timeout').value, 10),
-    check
-  };
-}
-
-document.getElementById('addMonitor').addEventListener('click', () => addMonitorForm());
-
-document.getElementById('generate').addEventListener('click', () => {
-  const monitors = [...document.querySelectorAll('.monitor')].map(collectMonitor);
-  const config = {
-    ...passthrough,
-    monitors,
-    retentionDays: toInt(document.getElementById('retentionDays').value, 365),
-    flappingThreshold: toInt(document.getElementById('flappingThreshold').value, 3),
-    heartbeatGapMinutesThreshold: toInt(document.getElementById('heartbeatGapMinutesThreshold').value, 2)
-  };
-  document.getElementById('output').value = JSON.stringify(config, null, 2);
-});
-
-document.getElementById('download').addEventListener('click', () => {
-  const blob = new Blob([document.getElementById('output').value], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'config.json';
-  a.click();
-});
-
-document.getElementById('upload').addEventListener('change', (event) => {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    let config;
-    try {
-      config = JSON.parse(reader.result);
-    } catch (error) {
-      alert('Datei ist kein gültiges JSON: ' + error.message);
-      return;
-    }
-    const { monitors, retentionDays, flappingThreshold, heartbeatGapMinutesThreshold, ...rest } = config;
-    passthrough = { smtpChannels: [], webhookChannels: [], statusPages: [], ...rest };
-    document.getElementById('retentionDays').value = retentionDays ?? 365;
-    document.getElementById('flappingThreshold').value = flappingThreshold ?? 3;
-    document.getElementById('heartbeatGapMinutesThreshold').value = heartbeatGapMinutesThreshold ?? 2;
-    document.getElementById('monitors').innerHTML = '';
-    (monitors ?? []).forEach(m => addMonitorForm(m));
-  };
-  reader.readAsText(file);
-});
-</script>
+<script src="/setup/config-model.js"></script>
+<script src="/setup/editor.js"></script>
 </body>
 </html>

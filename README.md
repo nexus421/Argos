@@ -35,8 +35,10 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
 - **Status pages**
   - Server-side rendered HTML (`kotlinx.html`), no JavaScript: name, UP/DOWN/UNKNOWN, last latency, time of the last check; auto-refresh every 30 s; light and dark theme.
   - Optional per-page **HTTP Basic Auth** with **Argon2id** password hashes. Error details (which name internal hosts and ports) are shown on authenticated pages only.
-- **Configuration generator**
-  - Browser UI at `/setup` for creating and editing the monitor list of a `config.json`. Channels, status pages and all other fields of a loaded file are preserved unchanged; monitor IDs survive a round trip.
+- **Configuration editor**
+  - Browser UI at `/setup` that covers the whole `config.json`: monitors, SMTP and webhook channels, status pages (including Basic Auth) and the general settings, each field with a short explanation. Start from scratch or load an existing file, then download or copy the result.
+  - Runs entirely in the browser: no request ever carries the configuration to the server, and nothing is stored there — the file only ever exists on your device.
+  - Validates live with the same rules as the server (IDs, ranges, cross references, regexes), so the download is disabled until Argos would accept the file. Unknown fields of a loaded file are preserved.
 - **Strict configuration validation**
   - IDs, ranges, cross references, regexes and TLS modes are validated at start. A rejected configuration is reported with the full list of issues; nothing that could crash the scheduler or silently drop an alert is accepted.
 
@@ -50,7 +52,7 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
 - **Database:** Exposed 1.5.0 + SQLite JDBC 3.53.4.0 + HikariCP 6.3.0 — WAL mode, 5 s busy timeout, single-threaded writer
 - **Mail:** Jakarta Mail 2.0.2
 - **Logging & utilities:** `bayern.kickner:Klogger:0.1.0` (application log, stdout), SLF4J Simple (framework warnings), `bayern.kickner:KotNexLib:4.3.0` (Argon2, CLI args, `ResultOf2`)
-- **Tests:** Kotest 5.9.1, Ktor `MockEngine` / `testApplication` (Mockk is declared but currently unused)
+- **Tests:** Kotest 5.9.1, Ktor `MockEngine` / `testApplication` (Mockk is declared but currently unused); GraalJS 25 (test scope only) runs the setup page's `config-model.js` inside Kotest to check its validation against the server's
 
 ---
 
@@ -253,7 +255,7 @@ Without a configuration (bootstrap mode):
 java -jar build/libs/argos.jar
 ```
 
-Open `http://localhost:8080/setup`, add your monitors and download `config.json`. `/` answers 503 until a valid configuration is loaded.
+Open `http://localhost:8080/setup`, add your monitors, channels and status pages and download `config.json` (the page never sends it to Argos). `/` answers 503 until a valid configuration is loaded.
 
 With a configuration:
 
@@ -273,6 +275,26 @@ Put the printed value into `statusPages[].basicAuth.passwordHash`.
 
 ## Production deployment with systemd
 
+### Quick install (Debian/Ubuntu)
+
+[`scripts/install.sh`](scripts/install.sh) sets everything up in one go. Create the directory, then run the installer inside it:
+
+```bash
+sudo mkdir -p /opt/argos && cd /opt/argos && curl -fsSL https://raw.githubusercontent.com/nexus421/Argos/main/scripts/install.sh | sudo bash
+```
+
+The installer
+
+- checks for Java 25+, `curl` and systemd and stops before touching anything if one is missing;
+- downloads `argos.jar` from the latest GitHub release (the release asset must be named `argos.jar`, which is what `./gradlew build` produces);
+- writes `/etc/systemd/system/argos.service` with the current directory as working directory and the user who invoked `sudo` as service user (`... | sudo bash -s -- --user NAME` picks another existing user);
+- enables and starts the service and verifies that it is running;
+- writes a `README.md` with the operating instructions (service commands, first-time configuration, update, rollback, backup, uninstall) into the directory.
+
+Running the same command again in the same directory **updates** Argos: `config.json` and `data/` are kept, the previous jar stays as `argos.jar.old`, the service is restarted. Without a `config.json` the service starts in bootstrap mode — open `http://<host>:8080/setup`, download the configuration into the directory and restart.
+
+### Manual installation
+
 1. Install the JAR and the configuration:
    ```bash
    sudo mkdir -p /opt/argos
@@ -281,14 +303,34 @@ Put the printed value into `statusPages[].basicAuth.passwordHash`.
    sudo chmod 600 /opt/argos/config.json
    ```
 
-2. Install and start the service unit:
+2. Create `/etc/systemd/system/argos.service` (this is the unit the installer generates):
+   ```ini
+   [Unit]
+   Description=Argos Monitoring
+   After=network-online.target
+   Wants=network-online.target
+
+   [Service]
+   Type=simple
+   User=root
+   WorkingDirectory=/opt/argos
+   # --enable-native-access: sqlite-jdbc loads native code; JDK 25 warns, later JDKs refuse without it
+   # -Xmx256m: plenty for Argos, prevents the JVM from claiming 1/4 of the host RAM
+   ExecStart=/usr/bin/java --enable-native-access=ALL-UNNAMED -Xmx256m -jar /opt/argos/argos.jar configPath=/opt/argos/config.json
+   Restart=always
+   RestartSec=5
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+3. Enable and start it:
    ```bash
-   sudo cp scripts/argos.service /etc/systemd/system/argos.service
    sudo systemctl daemon-reload
    sudo systemctl enable --now argos.service
    ```
 
-3. Verify:
+4. Verify:
    ```bash
    sudo systemctl status argos.service
    sudo journalctl -u argos.service -f
@@ -296,7 +338,7 @@ Put the printed value into `statusPages[].basicAuth.passwordHash`.
    ```
    `ERROR/Main` lines in the journal mean the configuration was rejected; `/` then returns 503 with the list of issues.
 
-The provided unit runs Argos as **`root`**. That is no longer a technical requirement: on Linux, ping monitors use the system `ping` binary (`/usr/bin/ping`, iputils), which carries the `cap_net_raw` file capability and therefore works for any user. To run unprivileged, add `User=argos` (after creating that user and giving it `/opt/argos`) — nothing else changes. Only where no `ping` binary exists does Argos fall back to `InetAddress.isReachable`, which needs `CAP_NET_RAW` (root or `AmbientCapabilities=CAP_NET_RAW`); without it the JDK silently probes TCP port 7 instead, which reports UP for hosts that answer with a reset and DOWN for hosts that drop the packet — nothing useful. At start Argos sends one real echo request to loopback with the selected backend and logs an error if that fails, plus an info line naming the backend.
+Running Argos as **`root`** is not a technical requirement: on Linux, ping monitors use the system `ping` binary (`/usr/bin/ping`, iputils), which carries the `cap_net_raw` file capability and therefore works for any user. To run unprivileged, set `User=` to an existing user that owns the directory — nothing else changes. Only where no `ping` binary exists does Argos fall back to `InetAddress.isReachable`, which needs `CAP_NET_RAW` (root or `AmbientCapabilities=CAP_NET_RAW`); without it the JDK silently probes TCP port 7 instead, which reports UP for hosts that answer with a reset and DOWN for hosts that drop the packet — nothing useful. At start Argos sends one real echo request to loopback with the selected backend and logs an error if that fails, plus an info line naming the backend.
 
 The JVM is started with `--enable-native-access=ALL-UNNAMED` (sqlite-jdbc loads native code) and `-Xmx256m`.
 

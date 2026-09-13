@@ -46,6 +46,9 @@ dependencies {
     testImplementation("io.mockk:mockk:1.13.13")
     testImplementation("io.ktor:ktor-server-test-host:3.5.2")
     testImplementation("io.ktor:ktor-client-mock:3.5.2")
+    // Runs the setup page's config-model.js inside Kotest so browser and server validation are checked against each other
+    testImplementation("org.graalvm.polyglot:polyglot:25.3.4.1")
+    testImplementation("org.graalvm.polyglot:js:25.3.4.1")
 }
 
 kotlin {
@@ -61,6 +64,7 @@ application {
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
 ktor {

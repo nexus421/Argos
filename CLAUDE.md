@@ -69,12 +69,28 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
   sonst still TCP-Port-7 (RST = „up", Drop = „down") — Probe dafür ist `CapEff` in `/proc/self/status`,
   nie `isReachable(loopback)`. Latenzen sind `Double`-Millisekunden aus `nanoTime`.
 - DNS-Caching ist per `Security.setProperty(...)` in `Main.kt` abgeschaltet.
+- Config-Editor unter `/setup` (`resources/static/`, via `staticResources`): rein clientseitig, deckt die ganze
+  `AppConfig` ab, lädt/speichert nie etwas am Server (Upload = `FileReader`, Download = Blob). `config-model.js`
+  ist DOM-frei und spiegelt `ConfigLoader.validate` samt Default-Werten und Meldungstexten 1:1 — jede neue
+  Regel/jedes neue Feld dort nachziehen. Zusätzlich fängt es ab, was der Server erst als Parse-Fehler ablehnt
+  (Enum-Werte, Ganzzahlen, Booleans), koerziert Zahlen-Strings wie der lenient Server-Parser und wirft bei
+  falscher Struktur (`normalize`) statt die Seite zu crashen; `ConfigModelJsTest` führt die Datei per GraalJS (nur Test-Scope) aus
+  und prüft sie gegen `loadConfig` und das README-Beispiel. `editor.js` (DOM) wird im Browser geprüft.
+  Ressourcen-Pfade in `index.html` absolut (`/setup/…`), weil `/setup` ohne Slash ausgeliefert wird.
+  Argon2-Hashes entstehen nicht im Browser (Feld + Hinweis auf `hashPassword=`); Download ist gesperrt,
+  solange die Validierung Fehler meldet; UI-Sprache Englisch.
+- Deployment: `scripts/install.sh` (Debian/systemd, `curl … | sudo bash` oder `sudo ./install.sh`) installiert ins
+  aktuelle Verzeichnis, lädt `argos.jar` vom neuesten GitHub-Release (`nexus421/Argos`, Asset muss `argos.jar`
+  heißen), erzeugt Unit (Service-User = `$SUDO_USER`, `--user` überschreibt; root technisch nicht nötig) und eine
+  README mit Betriebsanleitung. Erneuter Lauf = Update. Die Unit existiert nur im Skript (`render_unit`), keine
+  separate `.service`-Datei. Reine Helfer testet `bash scripts/install.test.sh` per Sourcing (`main` läuft nur bei direkter Ausführung).
+  Das Skript nie lokal ausführen — Test in einer Debian-VM.
 
 ## Nicht im Scope (bewusste Entscheidung)
 
-- Kein Login/Session/2FA, keine Mutations-API.
+- Kein Login/Session/2FA, keine Mutations-API — der Config-Editor unter `/setup` ist keine: er erzeugt die
+  Datei nur im Browser, der Server bekommt sie nie zu sehen.
 - Kein Hot-Reload der Config — Änderung erfordert Neustart.
 - Kein Docker-Support als Zielplattform.
 - Kein TLS im Webserver — Argos läuft hinter einem Reverse-Proxy, der TLS terminiert.
-- systemd-Unit läuft bewusst als `root` (Entscheidung, technisch nicht mehr nötig), kein Jitter im
-  Scheduler, Bind-Fehler beendet den Prozess.
+- Kein Jitter im Scheduler, Bind-Fehler beendet den Prozess.
