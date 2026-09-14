@@ -83,7 +83,7 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
   aktuelle Verzeichnis, lädt `argos.jar` vom neuesten GitHub-Release (`nexus421/Argos`, Asset muss `argos.jar`
   heißen), erzeugt Unit (Service-User = `$SUDO_USER`, `--user` überschreibt; root technisch nicht nötig) und eine
   README mit Betriebsanleitung. Erneuter Lauf = Update. Die Unit existiert nur im Skript (`render_unit`), keine
-  separate `.service`-Datei. Reine Helfer testet `bash scripts/install.test.sh` per Sourcing (`main` läuft nur bei direkter Ausführung).
+  separate `.service`-Datei.
   Das Skript nie lokal ausführen — Test in einer Debian-VM.
 
 ## Nicht im Scope (bewusste Entscheidung)

@@ -56,7 +56,7 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Pure helpers (no side effects; covered by scripts/install.test.sh)
+# Pure helpers (no side effects)
 # ---------------------------------------------------------------------------
 
 # Prints the major version found in the first line of `java -version` output, 0 if unparseable.
