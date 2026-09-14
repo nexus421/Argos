@@ -18,7 +18,7 @@ repositories {
 
 dependencies {
     implementation("bayern.kickner:Klogger:0.1.0")
-    implementation("bayern.kickner:KotNexLib:4.3.0")
+    implementation("bayern.kickner:KotNexLib:4.4.1")
 
     implementation("io.ktor:ktor-server-core:3.5.2")
     implementation("io.ktor:ktor-server-cio:3.5.2")
