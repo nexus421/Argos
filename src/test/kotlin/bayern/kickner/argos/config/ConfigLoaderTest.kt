@@ -1,7 +1,9 @@
 package bayern.kickner.argos.config
 
 import io.kotest.core.spec.style.FunSpec
+import bayern.kickner.argos.web.hashPassword
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldExist
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -199,5 +201,85 @@ class ConfigLoaderTest : FunSpec({
               { "id": "d", "name": "d", "intervalSeconds": 10, "timeoutSeconds": 2, "check": { "type": "ping", "host": "::1" } },
               { "id": "e", "name": "e", "intervalSeconds": 10, "timeoutSeconds": 2, "check": { "type": "ping", "host": "::ffff:192.0.2.1" } } ] }"""
         ).shouldBeInstanceOf<ResultOf2.Success<AppConfig>>()
+    }
+
+    test("a file that exists but cannot be read is reported as Unreadable, not as a parse error") {
+        val tmp = File.createTempFile("argos-unreadable", ".json").apply { writeText("{}"); setReadable(false) }
+        val readable = tmp.canRead()
+        tmp.delete()
+        // Root (or a filesystem without permission bits) can always read; nothing to test then
+        if (readable) return@test
+
+        val locked = File.createTempFile("argos-unreadable", ".json").apply { writeText("{}"); setReadable(false) }
+        val failure = loadConfig(locked.absolutePath).shouldBeInstanceOf<ResultOf2.Failure<ConfigError>>()
+        locked.delete()
+
+        failure.value.shouldBeInstanceOf<ConfigError.Unreadable>()
+    }
+
+    test("rejects unknown fields at every level with their path") {
+        val issues = issuesOf(
+            """{
+              "monitors": [ { "id": "m1", "name": "m", "intervalSeconds": 60, "timeoutSeconds": 10, "notificationChannelIDs": [],
+                              "check": { "type": "tcp", "host": "a", "port": 1, "timeout": 3 } } ],
+              "smtpChannels": [ { "id": "c1", "host": "h", "port": 25, "username": "u", "password": "p", "from": "a@b", "to": ["x@y"], "tsl": "none" } ],
+              "webhookChannels": [ { "id": "c2", "url": "https://h", "bodyTemplate": "{}", "header": {} } ],
+              "statusPages": [ { "id": "p", "name": "p", "monitorIds": ["m1"], "basicauth": { "username": "a", "passwordHash": "x" } },
+                               { "id": "q", "name": "q", "monitorIds": ["m1"], "basicAuth": { "username": "a", "passwordHash": "x", "pw": "y" } } ],
+              "retention": 3
+            }"""
+        )
+        issues shouldContain "Unknown field 'retention' in the top level"
+        issues shouldContain "Unknown field 'notificationChannelIDs' in monitors[0]"
+        issues shouldContain "Unknown field 'timeout' in monitors[0].check"
+        issues shouldContain "Unknown field 'tsl' in smtpChannels[0]"
+        issues shouldContain "Unknown field 'header' in webhookChannels[0]"
+        issues shouldContain "Unknown field 'basicauth' in statusPages[0]"
+        issues shouldContain "Unknown field 'pw' in statusPages[1].basicAuth"
+    }
+
+    test("rejects '.' and '..' as IDs although they match the character rule") {
+        val issues = issuesOf("""{ "statusPages": [ { "id": ".", "name": "p", "monitorIds": [] }, { "id": "..", "name": "q", "monitorIds": [] } ] }""")
+        issues shouldContain "Status page ID '.' must not be '.' or '..'"
+        issues shouldContain "Status page ID '..' must not be '.' or '..'"
+    }
+
+    test("rejects HTTP and webhook URLs without an http(s) scheme, methods that are not a plain token and status codes outside 100-599") {
+        val issues = issuesOf(
+            """{
+              "monitors": [ { "id": "h1", "name": "h", "intervalSeconds": 60, "timeoutSeconds": 10,
+                              "check": { "type": "http", "url": "example.com/health", "method": "G3T", "expectedStatusCodes": [200, 999, 0] } } ],
+              "webhookChannels": [ { "id": "w1", "url": "hooks.example/x", "method": "", "bodyTemplate": "{}" } ]
+            }"""
+        )
+        issues shouldContain "Monitor 'h1': url 'example.com/health' must start with http:// or https:// and contain no whitespace"
+        issues shouldContain "Monitor 'h1': method 'G3T' must be an HTTP method name such as GET or POST"
+        issues shouldContain "Monitor 'h1': expectedStatusCodes [999, 0] must be between 100 and 599"
+        issues shouldContain "Webhook channel 'w1': url 'hooks.example/x' must start with http:// or https:// and contain no whitespace"
+        issues shouldContain "Webhook channel 'w1': method '' must be an HTTP method name such as GET or POST"
+    }
+
+    test("rejects a DNS expectedIp that is not an IP literal and accepts IPv4 and IPv6 literals") {
+        fun dns(id: String, ip: String) = """{ "id": "$id", "name": "d", "intervalSeconds": 60, "timeoutSeconds": 10, "check": { "type": "dns", "hostname": "h", "expectedIp": "$ip" } }"""
+        val issues = issuesOf("""{ "monitors": [ ${dns("d1", "gateway")}, ${dns("d2", "999.1.1.1")}, ${dns("d3", "203.0.113.10")}, ${dns("d4", "2001:db8::1")} ] }""")
+        issues shouldContain "Monitor 'd1': expectedIp 'gateway' must be an IPv4 or IPv6 address"
+        issues shouldContain "Monitor 'd2': expectedIp '999.1.1.1' must be an IPv4 or IPv6 address"
+        issues.filter { it.contains("'d3'") || it.contains("'d4'") }.shouldBeEmpty()
+    }
+
+    test("rejects SMTP addresses without an @ and accepts ordinary ones") {
+        fun smtp(id: String, from: String, to: String) = """{ "id": "$id", "host": "h", "port": 25, "username": "u", "password": "p", "from": "$from", "to": $to }"""
+        val issues = issuesOf("""{ "smtpChannels": [ ${smtp("c1", "argos", """["ops", "a@b"]""")}, ${smtp("c2", "Argos <argos@example.com>", """["ops@example.com"]""")} ] }""")
+        issues shouldContain "SMTP channel 'c1': 'from' is not a valid e-mail address"
+        issues shouldContain "SMTP channel 'c1': 'to' contains an invalid e-mail address 'ops'"
+        issues.filter { it.contains("'c2'") }.shouldBeEmpty()
+    }
+
+    test("rejects a passwordHash that was not produced by hashPassword= and accepts a real one") {
+        fun page(id: String, hash: String) = """{ "id": "$id", "name": "p", "monitorIds": [], "basicAuth": { "username": "admin", "passwordHash": "$hash" } }"""
+        val issues = issuesOf("""{ "statusPages": [ ${page("p1", "secret")}, ${page("p2", "${'$'}argon2id${'$'}v=19${'$'}m=65536,t=3,p=1${'$'}abc${'$'}def")}, ${page("p3", hashPassword("secret"))} ] }""")
+        issues shouldContain "Status page 'p1': basicAuth.passwordHash is not a hash produced by hashPassword="
+        issues shouldContain "Status page 'p2': basicAuth.passwordHash is not a hash produced by hashPassword="
+        issues.filter { it.contains("'p3'") }.shouldBeEmpty()
     }
 })

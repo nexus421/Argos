@@ -39,7 +39,7 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
 - JVM-Toolchain: Amazon Corretto 25, Vendor gepinnt über `JvmVendorSpec.AMAZON`.
 - Gradle 9.6 via Wrapper.
 - Test-Framework: Kotest (JUnit-Platform), Mockk für Mocks.
-- Group/Koordinaten: `bayern.kickner:Argos:1.0-SNAPSHOT`.
+- Group/Koordinaten: `bayern.kickner:Argos`, Version steht in `build.gradle.kts` (`version = "…"`).
 - Zusätzliches Maven-Repo `nexus421MavenReleases` für `bayern.kickner:Klogger`/`KotNexLib`.
 
 ## Code style
@@ -52,14 +52,32 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
   `TriggerDecision`).
 - SQLite: `busy_timeout` immer vor `journal_mode=WAL` — beides als `SQLiteConfig`-Properties, **nicht**
   über `connectionInitSql` (sqlite-jdbc führt dort nur das erste Statement aus). Writes ausschließlich
-  über `Dispatchers.IO.limitedParallelism(1)` (`db/Database.kt`); History-Zugriffe über `db/CheckHistory.kt`.
+  über `Dispatchers.IO.limitedParallelism(1)`, Reads über `readDispatcher` (`db/Database.kt`); History-Zugriffe
+  über `db/CheckHistory.kt`, Alert-Queue über `db/PendingAlerts.kt`. `synchronous=NORMAL` ist bewusst (WAL).
 - Blockierende JDK-Netzaufrufe (DNS, Socket, ICMP) nur über `checks/BlockingTimeout.kt`, damit
   `timeoutSeconds` auch die Namensauflösung deckt.
-- Scheduler: kein Nachholen verpasster Ticks (`DueTracker`), kein Overlap pro Monitor; Pausen werden
+- Scheduler: erster Check jedes Monitors sofort beim Start, danach Epoch-Grid; kein Nachholen verpasster Ticks
+  (`DueTracker`), kein Overlap pro Monitor (`inFlight` wird genau einmal im `finally` freigegeben); Pausen werden
   über `classifyTickGap` gemeldet.
 - Config-Validierung ist hart: alles, was den Scheduler crashen oder Alerts still verschlucken könnte,
-  lehnt `loadConfig` ab. Parse-Fehler nie mit JSON-Inhalt loggen (Secrets). Ohne gültige Config läuft der
-  Server im Bootstrap-Zustand weiter, `/` antwortet dann 503 mit dem Grund (kein Exit, kein Restart-Loop).
+  lehnt `loadConfig` ab — auch unbekannte Keys (`Unknown field 'x' in path`). Parse-Fehler nie mit JSON-Inhalt
+  loggen (Secrets). Ohne gültige Config (oder ohne nutzbares `dataDir`) läuft der Server im Bootstrap-Zustand
+  weiter, `/` antwortet dann 503 nur mit der Kategorie (kein Exit, kein Restart-Loop); Details stehen nur im Log.
+  Neue Config-Regel = `ConfigLoader.validate` **und** `config-model.js` **und** ein `InvalidCase` in
+  `ConfigModelJsTest`, mit identischem Meldungstext. Neues Feld = zusätzlich in `*_KEYS` / `KNOWN_KEYS`.
+- Alerts nie direkt zustellen: `recordCheck` speichert Ergebnis + `pending_alert` atomar, Zustellung läuft im
+  `notificationScope` (`Scheduler.deliverAlert`), Retry/Parallelität im `NotificationDispatcher`. Zeile löschen
+  nur bei vollständiger Bestätigung, sonst auf die offenen Channels verengen. Wer zustellt, beansprucht die ID
+  vorher in `deliveringAlerts` (`add` == true) — sonst liefert schon ein anderer; Redelivery liest die Zeile frisch
+  (`pendingAlertById`).
+- Schema-Änderungen: `SCHEMA_VERSION` erhöhen und Schritt in `migrations` (db/Database.kt) eintragen; neue
+  Tabellen nur in `SchemaUtils.create` aufnehmen.
+- Blockierende Aufrufe nur auf eigenen `Dispatchers.IO.limitedParallelism`-Views (Checks, DB-Reads, Mail);
+  nie auf dem nackten `Dispatchers.IO`.
+- Ktor-Shutdown-Hook ist per Property aus (`io.ktor.server.engine.ShutdownHook=false`); die Stop-Reihenfolge
+  (Server → Checks → Zustellungen bis 30 s → Heartbeat → DB) steht in Main.kt.
+- Ktor-CIO-Client für Checks: `requestTimeout = 0`, `connectTimeout = INFINITE` — nur das `withTimeout` des
+  Checks darf einen Request beenden (`checks/HttpCheck.kt`).
 - `runCatching` in Coroutinen immer mit `.rethrowCancellation()` (`Coroutines.kt`), sonst wird ein
   Shutdown als fehlgeschlagener Check/Versand geloggt.
 - Öffentliche Status-Pages (ohne `basicAuth`) zeigen keine Fehlertexte — die nennen interne Hosts/Ports.

@@ -49,7 +49,8 @@
     const input = el('input', {
       type: 'number',
       value: Number.isFinite(object[key]) ? object[key] : '',
-      oninput: (event) => { object[key] = parseInt(event.target.value, 10); refresh(); }
+      // Number() keeps "1e3" as 1000 (parseInt would stop at "1"); an empty field stays unset, which validate() reports
+      oninput: (event) => { object[key] = event.target.value.trim() === '' ? NaN : Number(event.target.value); refresh(); }
     });
     return field(label, input, hint);
   }

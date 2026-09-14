@@ -3,6 +3,7 @@ package bayern.kickner.argos
 import bayern.kickner.argos.checks.defaultPingBackend
 import bayern.kickner.argos.checks.probeIcmp
 import bayern.kickner.argos.config.AppConfig
+import bayern.kickner.argos.config.ConfigError
 import bayern.kickner.argos.config.PingCheckConfig
 import bayern.kickner.argos.config.loadConfig
 import bayern.kickner.argos.db.connectDatabase
@@ -25,19 +26,26 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.job
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotnexlib.ArgsInterpreter
 import kotnexlib.ResultOf2
 import java.time.Instant
 
 private const val TAG = "Main"
 
+/** How long a shutdown waits for alert deliveries in flight. Whatever is not confirmed by then is re-delivered at the next start. */
+private const val NOTIFICATION_DRAIN_MILLIS = 30_000L
+
 /**
  * Argos main application entry point.
  *
  * Disables JVM DNS caching, parses arguments, loads configuration, initializes database and self-monitoring,
- * launches the scheduler loop, and binds the HTTP web server.
+ * launches the scheduler loop, and binds the HTTP web server. Shutdown order: HTTP server, checks, alert
+ * deliveries (bounded wait), heartbeat, database.
  *
  * @param args Command-line arguments: `configPath=<path>` (default `./config.json`) or
  * `hashPassword=<password>` to print an Argon2 hash for `statusPages[].basicAuth.passwordHash` and exit.
@@ -48,6 +56,8 @@ fun main(args: Array<String>) {
     java.security.Security.setProperty("networkaddress.cache.negative.ttl", "0")
     // Ktor/Hikari/Exposed log through SLF4J; keep only warnings so the journal stays readable
     System.setProperty("org.slf4j.simpleLogger.defaultLogLevel", "warn")
+    // Ktor would register its own JVM shutdown hook; Argos stops the server itself so the order below holds
+    System.setProperty("io.ktor.server.engine.ShutdownHook", "false")
     // Klogger drops every message until a destination is configured; stdout ends up in the journal under systemd
     KLogger.configure {
         logToConsole()
@@ -70,7 +80,19 @@ fun main(args: Array<String>) {
         staticLog(KLogger.Level.ERROR, TAG) { "Could not load configuration ($configResult) — server starting in empty state." }
     }
 
-    val appDatabase = connectDatabase(appConfig?.dataDir ?: "./data")
+    val webHost = appConfig?.webHost ?: "0.0.0.0"
+    val webPort = appConfig?.webPort ?: 8080
+
+    val dataDir = appConfig?.dataDir ?: "./data"
+    val appDatabase = runCatching { connectDatabase(dataDir) }.getOrElse { failure ->
+        // Same degradation as an invalid config: `/` answers 503 with the category, systemd sees no crash loop
+        staticLog(KLogger.Level.ERROR, TAG) { "Could not open the database in '$dataDir': ${failure.message} — server starting in empty state." }
+        val error = ConfigError.DataDirUnusable(failure.message ?: failure::class.simpleName ?: "unknown")
+        embeddedServer(ServerCIO, host = webHost, port = webPort) {
+            configureWeb(null, StatusSource { emptyList() }, error)
+        }.start(wait = true)
+        return
+    }
     val database = appDatabase.database
     val httpClient = HttpClient(ClientCIO)
     val notificationDispatcher = NotificationDispatcher(appConfig ?: AppConfig(), httpClient)
@@ -79,6 +101,8 @@ fun main(args: Array<String>) {
         staticLog(KLogger.Level.ERROR, TAG) { "Unhandled error in background job: ${throwable::class.simpleName}: ${throwable.message}" }
     }
     val appScope = CoroutineScope(SupervisorJob() + exceptionHandler)
+    // Deliveries live outside appScope: a shutdown cancels checks at once but lets alerts in flight finish (bounded below)
+    val notificationScope = CoroutineScope(SupervisorJob() + exceptionHandler)
 
     // Gap detection against the last heartbeat, then an immediate heartbeat so a crash loop cannot re-report the same gap
     val startedAt = Instant.now()
@@ -88,7 +112,7 @@ fun main(args: Array<String>) {
 
         if (gap) {
             staticLog(KLogger.Level.WARN, TAG) { "Unexpected restart detected. Last heartbeat: $lastHeartbeat" }
-            appScope.launch {
+            notificationScope.launch {
                 notificationDispatcher.sendSystemNotification(
                     subject = "Argos: unexpected offline period",
                     body = "Last active: $lastHeartbeat, now started: $startedAt"
@@ -97,26 +121,38 @@ fun main(args: Array<String>) {
         }
         writeHeartbeat(database, startedAt)
     }
-    appScope.launch { notificationDispatcher.sendSystemNotification(subject = "Argos started", body = "Started at $startedAt") }
+    notificationScope.launch { notificationDispatcher.sendSystemNotification(subject = "Argos started", body = "Started at $startedAt") }
 
     val scheduler = appConfig?.let { config ->
         warnIfIcmpUnavailable(config)
-        Scheduler(config, database, appScope, notificationDispatcher).also { runBlocking { it.restoreState() } }
+        Scheduler(config, database, appScope, notificationScope, notificationDispatcher).also { runBlocking { it.restoreState() } }
     }
     scheduler?.start()
-
-    Runtime.getRuntime().addShutdownHook(Thread {
-        appScope.cancel()
-        runCatching { runBlocking { writeHeartbeat(database, Instant.now()) } }
-        runCatching { appDatabase.close() }
-    })
 
     val statusSource: StatusSource = appConfig?.let { StatusService(it, database) { id -> scheduler?.stateOf(id) } }
         ?: StatusSource { emptyList() }
 
-    embeddedServer(ServerCIO, host = appConfig?.webHost ?: "0.0.0.0", port = appConfig?.webPort ?: 8080) {
+    val server = embeddedServer(ServerCIO, host = webHost, port = webPort) {
         configureWeb(appConfig, statusSource, configError)
-    }.start(wait = true)
+    }
+
+    Runtime.getRuntime().addShutdownHook(Thread {
+        runCatching { server.stop(1_000, 5_000) }
+        appScope.cancel()
+        runCatching {
+            runBlocking {
+                val drained = withTimeoutOrNull(NOTIFICATION_DRAIN_MILLIS) {
+                    notificationScope.coroutineContext.job.children.toList().joinAll()
+                }
+                if (drained == null) staticLog(KLogger.Level.WARN, TAG) { "Shutdown: alert deliveries still running after ${NOTIFICATION_DRAIN_MILLIS / 1000} s; queued alerts are re-delivered at the next start." }
+            }
+        }
+        notificationScope.cancel()
+        runCatching { runBlocking { writeHeartbeat(database, Instant.now()) } }
+        runCatching { appDatabase.close() }
+    })
+
+    server.start(wait = true)
 }
 
 /**

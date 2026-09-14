@@ -19,13 +19,14 @@ class DueTrackerTest : FunSpec({
         nextAlignedSecond(121, 60) shouldBe 180
     }
 
-    test("monitors become due at their aligned second and not in between") {
+    test("every monitor is due once right after start, then at its aligned second and not in between") {
         val tracker = DueTracker(listOf(monitor("a", 60), monitor("b", 45), monitor("c", 40)), now = 100)
 
+        tracker.due(100).map { it.id } shouldBe listOf("a", "b", "c")
         tracker.due(119).shouldBeEmpty()
         tracker.due(120).map { it.id } shouldBe listOf("a", "c")
         tracker.due(120).shouldBeEmpty()
-        tracker.due(140).map { it.id } shouldBe listOf("b")
+        tracker.due(135).map { it.id } shouldBe listOf("b")
     }
 
     test("a skipped tick does not lose a due monitor and the grid is kept afterwards") {

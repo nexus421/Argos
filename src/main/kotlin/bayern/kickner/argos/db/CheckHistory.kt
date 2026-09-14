@@ -1,10 +1,13 @@
 package bayern.kickner.argos.db
 
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greater
 import org.jetbrains.exposed.v1.core.inSubQuery
 import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.andWhere
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.select
@@ -58,6 +61,26 @@ suspend fun latestResults(database: Database, monitorId: String, limit: Int): Li
                 errorMessage = it[CheckHistoryTable.errorMessage]
             )
         }
+}
+
+/**
+ * Start of the current failure streak: the oldest failed result after the newest successful one. Call it BEFORE
+ * the recovering success is stored, otherwise the streak is already closed and the answer is null.
+ */
+suspend fun failingSince(database: Database, monitorId: String): Instant? = dbRead(database) {
+    val lastSuccess = CheckHistoryTable.select(CheckHistoryTable.timestamp)
+        .where { (CheckHistoryTable.monitorId eq monitorId) and (CheckHistoryTable.success eq true) }
+        .orderBy(CheckHistoryTable.timestamp, SortOrder.DESC)
+        .limit(1)
+        .firstOrNull()?.get(CheckHistoryTable.timestamp)
+
+    val failures = CheckHistoryTable.select(CheckHistoryTable.timestamp)
+        .where { (CheckHistoryTable.monitorId eq monitorId) and (CheckHistoryTable.success eq false) }
+    if (lastSuccess != null) failures.andWhere { CheckHistoryTable.timestamp greater lastSuccess }
+
+    failures.orderBy(CheckHistoryTable.timestamp, SortOrder.ASC)
+        .limit(1)
+        .firstOrNull()?.get(CheckHistoryTable.timestamp)
 }
 
 /**

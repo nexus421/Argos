@@ -3,6 +3,8 @@ package bayern.kickner.argos.db
 import io.kotest.assertions.throwables.shouldThrowAny
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import java.io.File
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.TransactionManager
@@ -37,15 +39,25 @@ class DatabaseTest : FunSpec({
         tempDir.deleteRecursively()
     }
 
-    test("enables WAL journal mode and a 5 s busy timeout on pooled connections") {
+    test("enables WAL journal mode, synchronous=NORMAL and a 5 s busy timeout on pooled connections") {
         val tempDir = Files.createTempDirectory("argos-db-wal").toFile()
         val appDatabase = connectDatabase(tempDir.absolutePath)
 
         dbRead(appDatabase.database) { pragma("journal_mode") } shouldBe "wal"
+        dbRead(appDatabase.database) { pragma("synchronous") } shouldBe "1"
         dbRead(appDatabase.database) { pragma("busy_timeout") } shouldBe "5000"
 
         appDatabase.close()
         tempDir.deleteRecursively()
+    }
+
+    test("an unusable data directory fails with a message naming it, so the caller can degrade") {
+        val blocker = Files.createTempFile("argos-not-a-dir", "").toFile()
+        val dataDir = File(blocker, "data").absolutePath
+
+        shouldThrowAny { connectDatabase(dataDir) }.message shouldContain dataDir
+
+        blocker.delete()
     }
 
     test("close releases the connection pool") {

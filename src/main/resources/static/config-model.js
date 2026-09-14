@@ -5,6 +5,30 @@ const ArgosConfigModel = (() => {
   const HOST_PATTERN = /^[A-Za-z0-9:][A-Za-z0-9._:%-]{0,253}$/;
   const CHECK_TYPES = ['http', 'tcp', 'ping', 'dns'];
   const TLS_MODES = ['starttls', 'ssl', 'none'];
+  // Mirrors ConfigLoader.kt: same patterns, same messages. Change both or ConfigModelJsTest fails.
+  const URL_PATTERN = /^https?:\/\/\S+$/i;
+  const METHOD_PATTERN = /^[A-Za-z]{1,16}$/;
+  // "local@domain" or "Display Name <local@domain>"; Jakarta Mail on the server is the authority, this catches typos
+  const EMAIL_PATTERN = /^(?:[^<>@]*<[^\s<>@]+@[^\s<>@]+>|[^\s<>@]+@[^\s<>@]+)$/;
+  // The server parses with InetAddress.ofLiteral; this approximation flags names and whitespace, not every bad octet
+  const IP_LITERAL_PATTERN = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.%a-zA-Z0-9]*)$/;
+  // Base64 of "$argon2id$v=19$" — the fixed prefix of every hash printed by `hashPassword=`
+  const PASSWORD_HASH_PATTERN = /^JGFyZ29uMmlkJHY9MTkk[A-Za-z0-9+/]+={0,2}$/;
+  const KNOWN_KEYS = {
+    root: ['monitors', 'smtpChannels', 'webhookChannels', 'statusPages', 'retentionDays', 'flappingThreshold',
+      'heartbeatGapMinutesThreshold', 'dataDir', 'webHost', 'webPort'],
+    monitor: ['id', 'name', 'intervalSeconds', 'timeoutSeconds', 'check', 'notificationChannelIds'],
+    check: {
+      http: ['type', 'url', 'method', 'headers', 'expectedStatusCodes', 'bodyRegex', 'followRedirects'],
+      tcp: ['type', 'host', 'port'],
+      ping: ['type', 'host'],
+      dns: ['type', 'hostname', 'expectedIp']
+    },
+    smtp: ['id', 'host', 'port', 'username', 'password', 'from', 'to', 'systemEvents', 'tls'],
+    webhook: ['id', 'url', 'method', 'headers', 'bodyTemplate', 'systemEvents'],
+    statusPage: ['id', 'name', 'monitorIds', 'basicAuth'],
+    basicAuth: ['username', 'passwordHash']
+  };
 
   const isBlank = (value) => String(value ?? '').trim() === '';
   const isInt = (value) => Number.isInteger(value);
@@ -31,7 +55,7 @@ const ArgosConfigModel = (() => {
   // A blank optional string means "unset": expectedIp "" would otherwise make a DNS monitor permanently DOWN.
   const optional = (value) => (isBlank(value) ? null : value);
 
-  // Defaults match the Kotlin data classes in AppConfig.kt / CheckConfig.kt. Unknown keys are kept: the server ignores them.
+  // Defaults match the Kotlin data classes in AppConfig.kt / CheckConfig.kt. Unknown keys are kept so validate() can report them.
   function normalizeCheck(raw, path) {
     const check = asObject(raw, path);
     const type = check.type ?? 'http';
@@ -124,14 +148,40 @@ const ArgosConfigModel = (() => {
     };
   }
 
+  // Unknown keys are errors, not warnings: "basicauth" would otherwise silently make a page public. The server
+  // reports the same paths, so a file that passes here is not rejected there.
+  function unknownFieldIssues(config, issues) {
+    const report = (object, known, where) => {
+      if (isObject(object) === false) return;
+      Object.keys(object)
+        .filter((key) => known.includes(key) === false)
+        .forEach((key) => issues.push(`Unknown field '${key}' in ${where}`));
+    };
+    report(config, KNOWN_KEYS.root, 'the top level');
+    config.monitors.forEach((monitor, index) => {
+      report(monitor, KNOWN_KEYS.monitor, `monitors[${index}]`);
+      const type = monitor.check.type;
+      if (Object.prototype.hasOwnProperty.call(KNOWN_KEYS.check, type)) report(monitor.check, KNOWN_KEYS.check[type], `monitors[${index}].check`);
+    });
+    config.smtpChannels.forEach((smtp, index) => report(smtp, KNOWN_KEYS.smtp, `smtpChannels[${index}]`));
+    config.webhookChannels.forEach((webhook, index) => report(webhook, KNOWN_KEYS.webhook, `webhookChannels[${index}]`));
+    config.statusPages.forEach((page, index) => {
+      report(page, KNOWN_KEYS.statusPage, `statusPages[${index}]`);
+      report(page.basicAuth, KNOWN_KEYS.basicAuth, `statusPages[${index}].basicAuth`);
+    });
+  }
+
   function validate(raw) {
     const issues = [];
     const config = normalize(raw);
     const { monitors, smtpChannels, webhookChannels, statusPages } = config;
 
+    unknownFieldIssues(config, issues);
+
     function checkId(kind, id) {
       const valid = ID_PATTERN.test(String(id));
       if (valid === false) issues.push(`${kind} ID '${id}' must match [A-Za-z0-9_.-] and be 1-64 characters long`);
+      else if (id === '.' || id === '..') issues.push(`${kind} ID '${id}' must not be '.' or '..'`);
     }
 
     function checkDuplicates(kind, ids) {
@@ -165,6 +215,16 @@ const ArgosConfigModel = (() => {
       if (valid === false) issues.push(`${owner}: port ${port} is out of range 1-65535`);
     }
 
+    function checkUrl(owner, url) {
+      if (isBlank(url)) issues.push(`${owner}: url must not be blank`);
+      else if (URL_PATTERN.test(String(url)) === false) issues.push(`${owner}: url '${url}' must start with http:// or https:// and contain no whitespace`);
+    }
+
+    function checkMethod(owner, method) {
+      const valid = METHOD_PATTERN.test(String(method));
+      if (valid === false) issues.push(`${owner}: method '${method}' must be an HTTP method name such as GET or POST`);
+    }
+
     checkDuplicates('monitor', monitors.map((m) => m.id));
     checkDuplicates('channel', [...smtpChannels, ...webhookChannels].map((c) => c.id));
     checkDuplicates('status page', statusPages.map((p) => p.id));
@@ -185,8 +245,11 @@ const ArgosConfigModel = (() => {
 
       const check = monitor.check;
       if (check.type === 'http') {
-        if (isBlank(check.url)) issues.push(`${owner}: url must not be blank`);
+        checkUrl(owner, check.url);
+        checkMethod(owner, check.method);
         if (check.expectedStatusCodes.length === 0) issues.push(`${owner}: expectedStatusCodes must not be empty`);
+        const badCodes = check.expectedStatusCodes.filter((code) => (isInt(code) && code >= 100 && code <= 599) === false);
+        if (badCodes.length > 0) issues.push(`${owner}: expectedStatusCodes ${list(badCodes)} must be between 100 and 599`);
         const regexError = check.bodyRegex == null ? null : regexProblem(check.bodyRegex);
         if (regexError != null) issues.push(`${owner}: bodyRegex is invalid (${regexError})`);
         checkBoolean(`${owner}: followRedirects`, check.followRedirects);
@@ -197,6 +260,9 @@ const ArgosConfigModel = (() => {
         checkHost(owner, check.host);
       } else if (check.type === 'dns') {
         checkHost(owner, check.hostname);
+        if (check.expectedIp != null && IP_LITERAL_PATTERN.test(String(check.expectedIp)) === false) {
+          issues.push(`${owner}: expectedIp '${check.expectedIp}' must be an IPv4 or IPv6 address`);
+        }
       } else {
         issues.push(`${owner}: check type must be one of ${CHECK_TYPES.join(', ')}`);
       }
@@ -208,22 +274,31 @@ const ArgosConfigModel = (() => {
       if (isBlank(smtp.host)) issues.push(`${owner}: host must not be blank`);
       checkPort(owner, smtp.port);
       if (smtp.to.length === 0) issues.push(`${owner}: 'to' must contain at least one recipient`);
+      smtp.to.filter((address) => EMAIL_PATTERN.test(String(address)) === false)
+        .forEach((address) => issues.push(`${owner}: 'to' contains an invalid e-mail address '${address}'`));
       if (isBlank(smtp.from)) issues.push(`${owner}: 'from' must not be blank`);
+      else if (EMAIL_PATTERN.test(String(smtp.from)) === false) issues.push(`${owner}: 'from' is not a valid e-mail address`);
       if (TLS_MODES.includes(smtp.tls) === false) issues.push(`${owner}: tls must be one of ${TLS_MODES.join(', ')}`);
       checkBoolean(`${owner}: systemEvents`, smtp.systemEvents);
     });
 
     webhookChannels.forEach((webhook) => {
-      checkId('Channel', webhook.id);
       const owner = `Webhook channel '${webhook.id}'`;
-      if (isBlank(webhook.url)) issues.push(`${owner}: url must not be blank`);
+      checkId('Channel', webhook.id);
+      checkUrl(owner, webhook.url);
+      checkMethod(owner, webhook.method);
       checkBoolean(`${owner}: systemEvents`, webhook.systemEvents);
     });
 
     statusPages.forEach((page) => {
+      const owner = `Status page '${page.id}'`;
       checkId('Status page', page.id);
       const unknownMonitors = page.monitorIds.filter((id) => monitorIds.has(id) === false);
-      if (unknownMonitors.length > 0) issues.push(`Status page '${page.id}': unknown monitorIds ${list(unknownMonitors)}`);
+      if (unknownMonitors.length > 0) issues.push(`${owner}: unknown monitorIds ${list(unknownMonitors)}`);
+      if (page.basicAuth !== null) {
+        if (isBlank(page.basicAuth.username)) issues.push(`${owner}: basicAuth.username must not be blank`);
+        if (PASSWORD_HASH_PATTERN.test(String(page.basicAuth.passwordHash)) === false) issues.push(`${owner}: basicAuth.passwordHash is not a hash produced by hashPassword=`);
+      }
     });
 
     checkPositiveInt('retentionDays', config.retentionDays);

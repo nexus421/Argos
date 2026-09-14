@@ -9,12 +9,14 @@ import bayern.kickner.argos.config.TcpCheckConfig
 import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.ktor.client.request.basicAuth
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import java.net.URI
@@ -104,16 +106,47 @@ class WebModuleTest : FunSpec({
         }
     }
 
-    test("without a config the root answers 503 with the reason and the setup page is served") {
+    test("without a config the root answers 503 with the category only — details stay in the log — and the setup page is served") {
         testApplication {
-            application { configureWeb(null, statusSource, ConfigError.ValidationError(listOf("Monitor 'x': intervalSeconds must be positive"))) }
+            application { configureWeb(null, statusSource, ConfigError.ValidationError(listOf("Monitor 'x': intervalSeconds must be positive", "Monitor 'db': host 'db.internal.corp' must be a hostname"))) }
 
             val root = client.get("/")
             root.status shouldBe HttpStatusCode.ServiceUnavailable
             root.bodyAsText() shouldContain "/setup"
-            root.bodyAsText() shouldContain "intervalSeconds must be positive"
+            root.bodyAsText() shouldContain "invalid (2 issue(s))"
+            root.bodyAsText() shouldContain "server log"
+            root.bodyAsText() shouldNotContain "intervalSeconds"
+            root.bodyAsText() shouldNotContain "db.internal.corp"
             client.get("/setup").status shouldBe HttpStatusCode.OK
             client.get("/status/public").status shouldBe HttpStatusCode.NotFound
+        }
+    }
+
+    test("parse errors, unreadable files and an unusable data directory are reported without their details") {
+        testApplication {
+            application { configureWeb(null, statusSource, ConfigError.ParseError("Failed to parse type 'Int' for input 'geheim'")) }
+            client.get("/").bodyAsText().let { it shouldContain "could not be parsed"; it shouldNotContain "geheim" }
+        }
+        testApplication {
+            application { configureWeb(null, statusSource, ConfigError.Unreadable("/opt/argos/config.json (Permission denied)")) }
+            client.get("/").bodyAsText().let { it shouldContain "could not be read"; it shouldNotContain "/opt/argos" }
+        }
+        testApplication {
+            application { configureWeb(null, statusSource, ConfigError.DataDirUnusable("'/opt/argos/data' is not a writable directory")) }
+            val root = client.get("/")
+            root.status shouldBe HttpStatusCode.ServiceUnavailable
+            root.bodyAsText().let { it shouldContain "data directory"; it shouldNotContain "/opt/argos" }
+        }
+    }
+
+    test("every response carries nosniff; only authenticated status pages are marked no-store") {
+        testApplication {
+            application { configureWeb(config, statusSource) }
+
+            client.get("/").headers["X-Content-Type-Options"] shouldBe "nosniff"
+            client.get("/setup").headers["X-Content-Type-Options"] shouldBe "nosniff"
+            client.get("/status/public").headers[HttpHeaders.CacheControl].shouldBeNull()
+            client.get("/status/private") { basicAuth("admin", "secret") }.headers[HttpHeaders.CacheControl] shouldBe "no-store"
         }
     }
 

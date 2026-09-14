@@ -105,7 +105,7 @@ private fun runPingProcess(binary: String, host: String, timeoutSeconds: Long, k
         return null to ""
     }
     // `-c 1` output is a few hundred bytes, far below the pipe buffer, so reading after exit cannot block
-    val output = process.inputStream.readAllBytes().decodeToString()
+    val output = process.inputStream.use { it.readAllBytes() }.decodeToString()
     return process.exitValue() to output
 }
 

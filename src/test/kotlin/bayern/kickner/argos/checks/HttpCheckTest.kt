@@ -5,7 +5,9 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIOEngineConfig
 import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.HttpRequestData
 import io.ktor.http.HttpStatusCode
@@ -64,6 +66,15 @@ class HttpCheckTest : FunSpec({
 
         seen.single().method.value shouldBe "HEAD"
         seen.single().headers["X-Token"] shouldBe "abc"
+    }
+
+    test("the shared check clients leave request and connect timeouts to the check's own withTimeout") {
+        // CIO defaults to 15 s per request and 5 s per connect; either would cut off a monitor with a larger timeoutSeconds
+        listOf(true, false).forEach { followRedirects ->
+            val engineConfig = checkClient(followRedirects).engine.config as CIOEngineConfig
+            engineConfig.requestTimeout shouldBe 0L
+            engineConfig.endpoint.connectTimeout shouldBe HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+        }
     }
 
     test("fails with a timeout message when the request exceeds timeoutSeconds") {

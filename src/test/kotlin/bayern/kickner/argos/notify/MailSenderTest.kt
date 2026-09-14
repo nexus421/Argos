@@ -5,6 +5,8 @@ import bayern.kickner.argos.config.SmtpTls
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import jakarta.mail.Session
 
 private fun smtp(tls: SmtpTls = SmtpTls.STARTTLS, username: String = "user") =
     SmtpConfig(id = "c", host = "mail.example", port = 587, username = username, password = "pw", from = "a@b", to = listOf("x@y"), tls = tls)
@@ -37,6 +39,15 @@ class MailSenderTest : FunSpec({
         props.getProperty("mail.smtp.connectiontimeout") shouldBe "10000"
         props.getProperty("mail.smtp.timeout") shouldBe "30000"
         props.getProperty("mail.smtp.writetimeout") shouldBe "30000"
+    }
+
+    test("subject and body are sent as UTF-8 regardless of the platform charset") {
+        val message = buildMimeMessage(Session.getInstance(buildSmtpProperties(smtp())), smtp(), "Größe ist DOWN", "Straße")
+        message.saveChanges()
+
+        message.getHeader("Content-Type").single() shouldContain "charset=UTF-8"
+        message.subject shouldBe "Größe ist DOWN"
+        message.getHeader("Subject").single() shouldContain "=?UTF-8?"
     }
 
     test("enables SMTP AUTH only when a username is configured") {

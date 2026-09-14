@@ -6,7 +6,7 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
 
 - **No Docker required** — runs directly on a Java 25 runtime (Linux, macOS, Windows) or as a native `systemd` service.
 - **No login, no sessions, no mutation API** — monitors and channels are statically defined in a single, human-readable JSON configuration file. Changing it means restarting the process.
-- **Resilient & crash-proof** — boots even with a missing or invalid configuration and offers an interactive client-side setup helper. In that state `/` answers **503** with the reason, so an external health check notices that monitoring is not running.
+- **Resilient & crash-proof** — boots even with a missing or invalid configuration (or an unusable data directory) and offers an interactive client-side setup helper. In that state `/` answers **503** naming the category of the problem (details are in the log), so an external health check notices that monitoring is not running.
 - **Low footprint** — Kotlin Coroutines with an epoch-aligned ticker, SQLite in WAL mode with serialized single-threaded writes, and lightweight server-side rendered status pages. Runs comfortably in 256 MiB of heap.
 
 ---
@@ -22,10 +22,11 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
   - Every check honours `timeoutSeconds`, including the name resolution step.
 - **Alerting & notification channels**
   - **SMTP** — Jakarta Mail with required STARTTLS (default), implicit TLS, or plaintext for trusted internal relays; optional SMTP AUTH; finite connect/read/write timeouts.
-  - **Webhooks** — HTTP requests with placeholder templating (`{{status}}` = `DOWN`/`UP`/`SYSTEM`, `{{monitorId}}`, `{{monitorName}}`, `{{subject}}`, `{{body}}`), automatic JSON escaping for `application/json` bodies, 15 s delivery timeout, non-2xx answers are logged as failures.
+  - **Webhooks** — HTTP requests with placeholder templating (`{{status}}` = `DOWN`/`UP`/`SYSTEM`, `{{monitorId}}`, `{{monitorName}}`, `{{subject}}`, `{{body}}`), automatic JSON escaping for `application/json` bodies, 15 s delivery timeout, non-2xx answers count as failures.
+  - **Delivery guarantee** — channels are addressed in parallel, each with four attempts (10/30/60 s apart). Every monitor alert is stored in SQLite together with the check result and removed only once all channels confirmed it; whatever is left is retried every 5 minutes and after a restart, so neither a slow SMTP server nor a restart during delivery loses an alert.
 - **Trigger logic**
   - **Flapping protection** — a DOWN alert fires after `flappingThreshold` consecutive failures, exactly once.
-  - **Recovery notification** — fires on the first successful check after a DOWN.
+  - **Recovery notification** — fires on the first successful check after a DOWN and names the start and length of the outage.
   - Trigger state is **restored from the history on restart**, so a restart neither repeats a DOWN alert nor swallows a recovery.
 - **Self-monitoring**
   - Heartbeat in SQLite every 30 s, at start and at clean shutdown.
@@ -38,9 +39,9 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
 - **Configuration editor**
   - Browser UI at `/setup` that covers the whole `config.json`: monitors, SMTP and webhook channels, status pages (including Basic Auth) and the general settings, each field with a short explanation. Start from scratch or load an existing file, then download or copy the result.
   - Runs entirely in the browser: no request ever carries the configuration to the server, and nothing is stored there — the file only ever exists on your device.
-  - Validates live with the same rules as the server (IDs, ranges, cross references, regexes), so the download is disabled until Argos would accept the file. Unknown fields of a loaded file are preserved.
+  - Validates live with the same rules as the server (IDs, ranges, cross references, regexes, unknown fields), so the download is disabled until Argos would accept the file.
 - **Strict configuration validation**
-  - IDs, ranges, cross references, regexes and TLS modes are validated at start. A rejected configuration is reported with the full list of issues; nothing that could crash the scheduler or silently drop an alert is accepted.
+  - IDs, ranges, cross references, URL schemes, e-mail addresses, IP literals, regexes, TLS modes and password hashes are validated at start, and unknown fields are rejected with their path. A rejected configuration is reported with the full list of issues in the log; nothing that could crash the scheduler or silently drop an alert is accepted.
 
 ---
 
@@ -51,7 +52,7 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
 - **Web & client:** Ktor 3.5.2 (CIO server and client engines, HTML builder, Basic Auth)
 - **Database:** Exposed 1.5.0 + SQLite JDBC 3.53.4.0 + HikariCP 6.3.0 — WAL mode, 5 s busy timeout, single-threaded writer
 - **Mail:** Jakarta Mail 2.0.2
-- **Logging & utilities:** `bayern.kickner:Klogger:0.1.0` (application log, stdout), SLF4J Simple (framework warnings), `bayern.kickner:KotNexLib:4.3.0` (Argon2, CLI args, `ResultOf2`)
+- **Logging & utilities:** `bayern.kickner:Klogger:0.1.0` (application log, stdout), SLF4J Simple (framework warnings), `bayern.kickner:KotNexLib:4.4.1` (Argon2, CLI args, `ResultOf2`)
 - **Tests:** Kotest 5.9.1, Ktor `MockEngine` / `testApplication` (Mockk is declared but currently unused); GraalJS 25 (test scope only) runs the setup page's `config-model.js` inside Kotest to check its validation against the server's
 
 ---
@@ -73,7 +74,9 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
 | (Ktor CIO) |                  | (epoch-aligned,  +------------->+---------------+
 +-----+------+                  |  no replay,      |  results     | check_history |
       |                         |  no overlap)     +------------->| self_monitor  |
-      +---> /setup (static UI)  +--------+---------+              +-------+-------+
+      +---> /setup (static UI)  +--------+---------+   alerts     | pending_alert |
+      |                                  |          +------------->| schema_version|
+      |                                  |                         +-------+-------+
       +---> /  (health: 200/503)         |                                |
       +---> /status/{id} (opt. Basic     +---> HTTP / TCP / Ping / DNS    |
             Auth, reads history) <----------------------------------------+
@@ -94,10 +97,11 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
 
 ### Key design decisions
 
-1. **SQLite WAL & one writer.** WAL lets status pages read while checks write. All writes go through `Dispatchers.IO.limitedParallelism(1)`; `busy_timeout` and `journal_mode` are set as driver properties (sqlite-jdbc executes only the first statement of `connectionInitSql`).
-2. **Epoch-aligned scheduler without replay.** Every monitor has a due second on the epoch grid (multiples of `intervalSeconds`); monitors with the same interval therefore run in the same second. A late or skipped tick never loses a run. After a pause each monitor runs once and re-joins the grid. A monitor whose previous check is still running skips the tick — checks of one monitor never overlap; notifications are delivered outside that lock.
-3. **Hard validation, soft start.** Anything that could crash the scheduler or drop an alert is rejected at load time. The process still starts (bootstrap state, `/` = 503) so the setup page is reachable and `systemd` does not enter a restart loop.
-4. **Immutability.** No runtime configuration changes; edit `config.json` and restart.
+1. **SQLite WAL & one writer.** WAL lets status pages read while checks write. All writes go through `Dispatchers.IO.limitedParallelism(1)`, reads through a bounded view of their own; `busy_timeout`, `journal_mode` and `synchronous=NORMAL` are set as driver properties (sqlite-jdbc executes only the first statement of `connectionInitSql`). The schema carries a version; older databases are migrated at start, a database from a newer build is refused.
+2. **Epoch-aligned scheduler without replay.** Every monitor runs once right after start, then has a due second on the epoch grid (multiples of `intervalSeconds`); monitors with the same interval therefore run in the same second. A late or skipped tick never loses a run. After a pause each monitor runs once and re-joins the grid. A monitor whose previous check is still running skips the tick — checks of one monitor never overlap; notifications are delivered in a separate scope outside that lock.
+3. **Alerts are queued, not fired.** A check result and the alert it triggers are stored in one transaction (`pending_alert`); the delivery removes the row once every channel confirmed, otherwise the row keeps the open channels and the scheduler retries. Blocking network calls (checks, mail) and database reads run on separate thread pools, so a DNS outage cannot starve the status pages.
+4. **Hard validation, soft start.** Anything that could crash the scheduler or drop an alert is rejected at load time, including unknown fields. The process still starts (bootstrap state, `/` = 503) so the setup page is reachable and `systemd` does not enter a restart loop.
+5. **Immutability.** No runtime configuration changes; edit `config.json` and restart.
 
 ---
 
@@ -184,7 +188,7 @@ Argos reads its configuration from `./config.json` or the file given as `configP
       "monitorIds": ["web-api", "db-server", "gateway-ping"],
       "basicAuth": {
         "username": "admin",
-        "passwordHash": "<output of: java -jar argos.jar hashPassword=...>"
+        "passwordHash": "JGFyZ29uMmlkJHY9MTkkbT02NTUzNix0PTMscD0xJEdOZXF5YjBBcDI4TzhraExXK2VZNnc9PSR3OE1kWHlWQzhhYTZTMU4vOG5lOWdPSTRHbWZDSWgyS3VraVdPSzVoWEprPQ=="
       }
     }
   ],
@@ -197,6 +201,8 @@ Argos reads its configuration from `./config.json` or the file given as `configP
 }
 ```
 
+The example hash is for the password `change-me` — generate your own with `hashPassword=` (see below).
+
 ### Field reference
 
 | Field | Default | Notes |
@@ -205,24 +211,24 @@ Argos reads its configuration from `./config.json` or the file given as `configP
 | `monitors[].intervalSeconds` | — | > 0. Monitors run at epoch multiples of this value. |
 | `monitors[].timeoutSeconds` | — | > 0 and < `intervalSeconds`. Covers name resolution as well. |
 | `monitors[].check.type` | — | `http`, `tcp`, `ping`, `dns`. |
-| `check.url`, `method`, `headers`, `expectedStatusCodes`, `bodyRegex`, `followRedirects` | `GET`, `{}`, `[200]`, none, `true` | HTTP. `bodyRegex` must compile; it is matched against the first 1 MiB of the body. Without `bodyRegex` the body is not read. |
+| `check.url`, `method`, `headers`, `expectedStatusCodes`, `bodyRegex`, `followRedirects` | `GET`, `{}`, `[200]`, none, `true` | HTTP. `url` must start with `http://` or `https://`, `method` is a plain token such as `GET`, status codes are 100–599. `bodyRegex` must compile; it is matched against the first 1 MiB of the body. Without `bodyRegex` the body is not read. Redirects are followed for GET/HEAD only. |
 | `check.host`, `check.port` | — | TCP (`port` 1–65535) and Ping (`host` only). Hosts are hostnames or IPv4/IPv6 literals (zone IDs allowed) and must not start with `-`. |
-| `check.hostname`, `check.expectedIp` | — | DNS. `expectedIp` must equal one of the resolved addresses (IPv4 or IPv6 text form). |
+| `check.hostname`, `check.expectedIp` | — | DNS. `expectedIp` must be an IPv4 or IPv6 literal and is compared by address, so `2001:db8::1` matches however the resolver spells it. |
 | `monitors[].notificationChannelIds` | `null` | `null`/omitted = all channels; `[]` = no alerts (status-page-only monitor); otherwise IDs must exist. |
 | `smtpChannels[].tls` | `"starttls"` | `starttls` (required — the connection fails if the server does not offer it), `ssl` (implicit TLS, e.g. port 465), `none` (plaintext). The certificate hostname is always verified. |
-| `smtpChannels[].username` | — | SMTP AUTH is used when non-empty. `to` must contain at least one address. |
-| `webhookChannels[].headers` | `{}` | With `Content-Type: application/json` all placeholder values are JSON-escaped. |
+| `smtpChannels[].username` | — | SMTP AUTH is used when non-empty. `from` and every `to` entry must look like `user@host` or `Name <user@host>`; `to` must contain at least one address. |
+| `webhookChannels[].url`, `method`, `headers` | —, `POST`, `{}` | `url` must start with `http://` or `https://`, `method` is a plain token. With `Content-Type: application/json` all placeholder values are JSON-escaped. |
 | `webhookChannels[].bodyTemplate` | — | Placeholders: `{{status}}` (`DOWN`/`UP`/`SYSTEM`), `{{subject}}`, `{{body}}`, `{{monitorId}}`, `{{monitorName}}` (the last two only for monitor alerts). |
 | `*.systemEvents` | `true` | Whether the channel receives system events. |
 | `statusPages[].id` | — | Becomes the path `/status/<id>`; same character rules as monitor IDs. `monitorIds` must exist. |
-| `statusPages[].basicAuth` | none | `username` + `passwordHash` (Argon2id, generate with `hashPassword=`). Protected pages also show error details. |
+| `statusPages[].basicAuth` | none | `username` + `passwordHash` (Argon2id, generate with `hashPassword=` — anything else is rejected at start). Protected pages also show error details. |
 | `retentionDays` | `365` | History older than this is deleted at start and daily at 00:00 UTC, in batches. |
 | `flappingThreshold` | `3` | Consecutive failures before a DOWN alert. |
 | `heartbeatGapMinutesThreshold` | `2` | Gap length that counts as unexpected downtime / scheduler pause. |
 | `dataDir` | `"./data"` | Created if missing; holds `argos.db` (+ `-wal`/`-shm` while running). Relative to the working directory. |
 | `webHost`, `webPort` | `"0.0.0.0"`, `8080` | Bind address. Argos serves plain HTTP — put a TLS-terminating reverse proxy in front and bind to `127.0.0.1` when the proxy runs on the same host. |
 
-Unknown fields are ignored. The config file contains SMTP passwords and webhook tokens: keep it out of version control (`config.json` is git-ignored) and restrict it with `chmod 600`.
+Unknown fields are rejected with their path (`Unknown field 'basicauth' in statusPages[1]`) — a typo would otherwise silently fall back to the default, here a public page. The config file contains SMTP passwords and webhook tokens: keep it out of version control (`config.json` is git-ignored) and restrict it with `chmod 600`.
 
 ---
 
@@ -336,7 +342,7 @@ Running the same command again in the same directory **updates** Argos: `config.
    sudo journalctl -u argos.service -f
    curl -i http://127.0.0.1:8080/
    ```
-   `ERROR/Main` lines in the journal mean the configuration was rejected; `/` then returns 503 with the list of issues.
+   `ERROR/Main` lines in the journal mean the configuration was rejected; `/` then returns 503 and the journal lists the issues.
 
 Running Argos as **`root`** is not a technical requirement: on Linux, ping monitors use the system `ping` binary (`/usr/bin/ping`, iputils), which carries the `cap_net_raw` file capability and therefore works for any user. To run unprivileged, set `User=` to an existing user that owns the directory — nothing else changes. Only where no `ping` binary exists does Argos fall back to `InetAddress.isReachable`, which needs `CAP_NET_RAW` (root or `AmbientCapabilities=CAP_NET_RAW`); without it the JDK silently probes TCP port 7 instead, which reports UP for hosts that answer with a reset and DOWN for hosts that drop the packet — nothing useful. At start Argos sends one real echo request to loopback with the selected backend and logs an error if that fails, plus an info line naming the backend.
 
@@ -344,12 +350,15 @@ The JVM is started with `--enable-native-access=ALL-UNNAMED` (sqlite-jdbc loads 
 
 ### Operations
 
-- **Health check:** `GET /` → `200` while a valid configuration is loaded, `503` otherwise. Point the proxy's health check or an external uptime monitor at it.
-- **Reverse proxy:** terminate TLS there and rate-limit `/status/*` if the pages are reachable from the internet (Argon2 verification is limited to two parallel checks of ~64 MiB each, but a limit such as nginx `limit_req` keeps the pages responsive under abuse).
-- **Backup:** `<dataDir>/argos.db` is a SQLite database in WAL mode. Back it up with `sqlite3 argos.db ".backup argos-backup.db"` (safe while running) rather than copying the raw file. The database only holds history and the heartbeat; losing it loses the history, not the configuration.
+- **Health check:** `GET /` → `200` while a valid configuration is loaded, `503` otherwise (invalid or unreadable configuration, or a `dataDir` that cannot be opened). The body names only the category; the details are in the journal.
+- **Reverse proxy:** terminate TLS there and rate-limit `/status/*` if the pages are reachable from the internet (Argon2 verification runs one at a time, ~64 MiB and ~100 ms each, so a limit such as nginx `limit_req` keeps the pages responsive under abuse). Authenticated pages are sent with `Cache-Control: no-store`.
+- **Backup:** `<dataDir>/argos.db` is a SQLite database in WAL mode. Back it up with `sqlite3 argos.db ".backup argos-backup.db"` (safe while running) rather than copying the raw file. The database holds history, the heartbeat and queued alerts; losing it loses the history, not the configuration.
+- **Alert delivery:** channels are notified in parallel, four attempts over ~100 s. A monitor alert is stored in `pending_alert` together with the check result and removed once every channel confirmed; what is left is retried every 5 minutes and at the next start, alerts older than 24 h are dropped with an error log. Only the order of a successful first delivery is guaranteed: a DOWN still in retry can be overtaken by a fast UP.
+- **First run:** every monitor is checked once right after start, then on its epoch grid.
+- **Schema:** `argos.db` carries a `schema_version`; older databases are migrated on start, a database from a newer build is refused (the process starts in bootstrap mode with `/` = 503).
 - **Logging:** application log via Klogger on stdout, framework warnings (Ktor, HikariCP, Exposed) via SLF4J at WARN and above; both land in the journal.
 - **Ping details:** `ping -c 1 -W <timeoutSeconds> -n -- <host>` with `LC_ALL=C`; UP/DOWN comes from the exit code (0 reply, 1 no reply or ICMP error, 2 tool error such as an unknown host), the latency from the tool's `time=` field. A process that outlives the timeout is killed. Requires iputils (`ping -V`), present on every mainstream distribution (BusyBox ping is not supported). Do not set `NoNewPrivileges=true` in the unit when running unprivileged — it disables the binary's file capability; the startup probe would report `Operation not permitted`.
-- **Shutdown:** `SIGTERM` writes a final heartbeat and checkpoints the WAL. Planned stops longer than `heartbeatGapMinutesThreshold` are still reported as an unexpected offline period on the next start — there is no maintenance mode.
+- **Shutdown:** `SIGTERM` stops the HTTP server, cancels running checks, waits up to 30 s for alert deliveries in flight, writes a final heartbeat and checkpoints the WAL. Planned stops longer than `heartbeatGapMinutesThreshold` are still reported as an unexpected offline period on the next start — there is no maintenance mode.
 
 ---
 

@@ -18,13 +18,15 @@ fun nextAlignedSecond(fromSecond: Long, intervalSeconds: Long): Long =
  * lose a run, and after a long pause every monitor runs exactly once before re-joining the grid.
  *
  * @param monitors Configured monitors.
- * @param now Epoch second at construction; first runs are aligned from here.
+ * @param now Epoch second at construction; every monitor is due right away, later runs are aligned from here.
  */
 class DueTracker(private val monitors: List<MonitorConfig>, now: Long) {
     private val nextDue = HashMap<String, Long>()
 
     init {
-        realign(now)
+        // Every monitor runs once right away: a restart must not leave an outage undetected until its next grid
+        // second (up to a full interval). Afterwards `due` puts it back on the epoch grid.
+        monitors.forEach { nextDue[it.id] = now }
     }
 
     /**

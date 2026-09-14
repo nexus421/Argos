@@ -1,8 +1,11 @@
 package bayern.kickner.argos.notify
 
+private val placeholderPattern = Regex("""\{\{(\w+)}}""")
+
 /**
  * Replaces placeholders in the format `{{key}}` within [template] with matching values from [placeholders].
- * Unmatched placeholders are left unchanged.
+ * Unmatched placeholders are left unchanged. Each placeholder is resolved once in a single pass, so a value
+ * that itself contains `{{...}}` (error messages are partly network-controlled) is never expanded again.
  *
  * @param template Source string containing `{{placeholder}}` tokens.
  * @param placeholders Map of placeholder keys to replacement values.
@@ -10,8 +13,9 @@ package bayern.kickner.argos.notify
  * @return Formatted string with substituted placeholders.
  */
 fun renderTemplate(template: String, placeholders: Map<String, String>, escapeJson: Boolean = false): String =
-    placeholders.entries.fold(template) { acc, (key, value) ->
-        acc.replace("{{$key}}", if (escapeJson) jsonEscape(value) else value)
+    placeholderPattern.replace(template) { match ->
+        val value = placeholders[match.groupValues[1]] ?: return@replace match.value
+        if (escapeJson) jsonEscape(value) else value
     }
 
 /**

@@ -53,12 +53,17 @@ fun sendMail(config: SmtpConfig, subject: String, body: String) {
     }
     val session = Session.getInstance(buildSmtpProperties(config), authenticator)
 
-    val message = MimeMessage(session).apply {
+    Transport.send(buildMimeMessage(session, config, subject, body))
+}
+
+/**
+ * Builds the plaintext message. The charset is explicit: without it Jakarta Mail falls back to `file.encoding`,
+ * and monitor names carry umlauts.
+ */
+fun buildMimeMessage(session: Session, config: SmtpConfig, subject: String, body: String): MimeMessage =
+    MimeMessage(session).apply {
         setFrom(InternetAddress(config.from))
         setRecipients(Message.RecipientType.TO, config.to.map { InternetAddress(it) }.toTypedArray())
-        setSubject(subject)
-        setText(body)
+        setSubject(subject, "UTF-8")
+        setText(body, "UTF-8")
     }
-
-    Transport.send(message)
-}

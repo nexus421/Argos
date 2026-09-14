@@ -16,6 +16,16 @@ class TemplateTest : FunSpec({
         result shouldBe "{{unknown}}"
     }
 
+    test("a placeholder inside a value is inserted literally, never expanded again") {
+        // body is listed first on purpose: a sequential replace would expand the {{status}} it carries afterwards
+        val result = renderTemplate("{{status}} {{body}}", mapOf("body" to "error {{status}} {{monitorId}}", "status" to "DOWN"))
+        result shouldBe "DOWN error {{status}} {{monitorId}}"
+    }
+
+    test("dollar signs and backslashes in values survive untouched") {
+        renderTemplate("{{body}}", mapOf("body" to "cost $1 \\ \$2")) shouldBe "cost $1 \\ \$2"
+    }
+
     test("jsonEscape escapes quotes, backslashes, newlines and control characters") {
         jsonEscape("""say "hi"\ line1
 line2	tab""" + "\u0001") shouldBe """say \"hi\"\\ line1\nline2\ttab\u0001"""

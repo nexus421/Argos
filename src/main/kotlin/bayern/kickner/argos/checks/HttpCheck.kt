@@ -4,6 +4,8 @@ import bayern.kickner.argos.config.HttpCheckConfig
 import bayern.kickner.argos.rethrowCancellation
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.cio.endpoint
+import io.ktor.client.plugins.HttpTimeoutConfig
 import io.ktor.client.request.header
 import io.ktor.client.request.prepareRequest
 import io.ktor.client.statement.HttpResponse
@@ -20,8 +22,20 @@ import java.util.concurrent.ConcurrentHashMap
 /** Upper bound of response bytes inspected by `bodyRegex`; protects the heap against huge responses. */
 const val HTTP_BODY_LIMIT_BYTES = 1024 * 1024
 
-private val clientWithRedirects by lazy { HttpClient(CIO) { followRedirects = true } }
-private val clientWithoutRedirects by lazy { HttpClient(CIO) { followRedirects = false } }
+/**
+ * Only the check's own `withTimeout` may end a request. CIO's defaults — 5 s connect, 15 s request — would
+ * otherwise cut off every monitor with a larger `timeoutSeconds` and report an engine message instead.
+ */
+internal fun checkClient(followRedirects: Boolean): HttpClient = HttpClient(CIO) {
+    this.followRedirects = followRedirects
+    engine {
+        requestTimeout = 0
+        endpoint { connectTimeout = HttpTimeoutConfig.INFINITE_TIMEOUT_MS }
+    }
+}
+
+private val clientWithRedirects by lazy { checkClient(followRedirects = true) }
+private val clientWithoutRedirects by lazy { checkClient(followRedirects = false) }
 private val compiledRegexes = ConcurrentHashMap<String, Regex>()
 
 /**

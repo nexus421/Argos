@@ -34,3 +34,31 @@ object SelfMonitorTable : Table("self_monitor") {
 
     override val primaryKey = PrimaryKey(id)
 }
+
+/**
+ * Alerts whose delivery has not been confirmed yet. A row is written in the same transaction as the check result
+ * that triggered it and deleted once every channel accepted the notification; a crash or shutdown in between
+ * therefore never loses an alert (it is re-delivered by the scheduler, at the latest at the next start).
+ */
+object PendingAlertTable : Table("pending_alert") {
+    val id = long("id").autoIncrement()
+    val monitorId = varchar("monitor_id", 64)
+    /** `DOWN` or `UP`, see `MonitorEvent`; kept as text so the db package does not depend on notify. */
+    val event = varchar("event", 8)
+    val subject = text("subject")
+    val body = text("body")
+    /** Comma-separated channel IDs still waiting for this alert (IDs cannot contain commas). */
+    val channelIds = text("channel_ids")
+    val createdAt = timestamp("created_at")
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+/**
+ * Single-row table with the schema version the database is at; see `migrateSchema` in Database.kt.
+ */
+object SchemaVersionTable : Table("schema_version") {
+    val version = integer("version")
+
+    override val primaryKey = PrimaryKey(version)
+}

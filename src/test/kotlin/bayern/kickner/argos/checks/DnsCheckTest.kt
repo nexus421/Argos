@@ -18,6 +18,23 @@ class DnsCheckTest : FunSpec({
         result.success shouldBe false
     }
 
+    test("an IPv6 expectedIp in compressed form matches the JDK's expanded text form") {
+        val resolver: (String) -> Array<InetAddress> = { arrayOf(InetAddress.getByName("2001:db8:0:0:0:0:0:1")) }
+
+        val result = executeDnsCheck(DnsCheckConfig("v6.example", expectedIp = "2001:db8::1"), timeoutSeconds = 2, resolver = resolver)
+
+        result.success shouldBe true
+    }
+
+    test("an expectedIp that is not an IP literal fails without a lookup") {
+        val resolver: (String) -> Array<InetAddress> = { arrayOf(InetAddress.getLoopbackAddress()) }
+
+        val result = executeDnsCheck(DnsCheckConfig("localhost", expectedIp = "gateway"), timeoutSeconds = 2, resolver = resolver)
+
+        result.success shouldBe false
+        result.message shouldContain "not a valid IP address"
+    }
+
     test("fails with a timeout message when resolution takes longer than timeoutSeconds") {
         val slowResolver: (String) -> Array<InetAddress> = { Thread.sleep(5000); arrayOf(InetAddress.getLoopbackAddress()) }
 

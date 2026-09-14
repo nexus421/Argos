@@ -3,7 +3,10 @@ package bayern.kickner.argos.web
 import bayern.kickner.argos.config.AppConfig
 import bayern.kickner.argos.config.ConfigError
 import bayern.kickner.argos.config.StatusPageConfig
+import io.ktor.http.HttpHeaders
 import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.UserIdPrincipal
@@ -12,6 +15,7 @@ import io.ktor.server.auth.basic
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.html.respondHtml
 import io.ktor.server.http.content.staticResources
+import io.ktor.server.response.header
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.RoutingCall
 import io.ktor.server.routing.get
@@ -35,10 +39,10 @@ import kotlinx.html.unsafe
 import kotnexlib.crypto.Argon2Helper
 
 /**
- * Argon2 verification costs ~64 MiB and ~100 ms each. Bounding the parallelism caps the memory an
- * unauthenticated burst can pin and keeps the work off the scheduler's Default dispatcher.
+ * Argon2 verification costs ~64 MiB heap and ~100 ms each. One at a time keeps the worst case at 64 MiB of the
+ * 256 MiB heap and the work off the scheduler's Default dispatcher; rate-limit the status pages in the reverse proxy.
  */
-private val argonDispatcher = Dispatchers.IO.limitedParallelism(2)
+private val argonDispatcher = Dispatchers.IO.limitedParallelism(1)
 
 private const val STATUS_PAGE_CSS = """
 :root { color-scheme: light dark; --bg: #fff; --fg: #222; --line: #ddd; --muted: #6b7280; --up: #1a7f37; --down: #b91c1c; }
@@ -57,9 +61,14 @@ th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--line)
  *
  * @param config Application configuration or null if running in empty bootstrap state.
  * @param statusSource Provider of the rows shown on status pages.
- * @param configError Why no configuration is loaded; rendered on `/` so a health check notices the dead state.
+ * @param configError Why no configuration is loaded; `/` then answers 503 so a health check notices the dead state.
  */
 fun Application.configureWeb(config: AppConfig?, statusSource: StatusSource, configError: ConfigError? = null) {
+    // `/` and `/setup` are public; nothing served here should ever be sniffed into another content type
+    intercept(ApplicationCallPipeline.Plugins) {
+        call.response.header("X-Content-Type-Options", "nosniff")
+    }
+
     if (config != null) {
         installBasicAuthProviders(config)
     }
@@ -95,13 +104,18 @@ fun Application.configureWeb(config: AppConfig?, statusSource: StatusSource, con
 }
 
 /**
- * Human-readable reason for the bootstrap state. The file path is deliberately omitted: `/` is public.
+ * Category of the bootstrap reason for the public `/`. Details (paths, hostnames, offending values) stay in the log.
  */
-private fun describe(error: ConfigError?): String = when (error) {
-    null -> "No configuration file was given."
-    is ConfigError.FileNotFound -> "The configuration file was not found."
-    is ConfigError.ParseError -> "The configuration could not be parsed: ${error.message}."
-    is ConfigError.ValidationError -> "The configuration is invalid: ${error.issues.joinToString("; ")}."
+private fun describe(error: ConfigError?): String {
+    val reason = when (error) {
+        null -> "No configuration file was given."
+        is ConfigError.FileNotFound -> "The configuration file was not found."
+        is ConfigError.Unreadable -> "The configuration file could not be read."
+        is ConfigError.ParseError -> "The configuration could not be parsed."
+        is ConfigError.ValidationError -> "The configuration is invalid (${error.issues.size} issue(s))."
+        is ConfigError.DataDirUnusable -> "The data directory could not be opened."
+    }
+    return "$reason Details are in the server log."
 }
 
 /**
@@ -129,9 +143,10 @@ private fun Application.installBasicAuthProviders(config: AppConfig) {
  * Renders the HTML response for a status page. kotlinx.html escapes all text nodes.
  *
  * @param showDetails Whether error messages are rendered; they name internal hosts and ports, so only
- * authenticated pages show them.
+ * authenticated pages show them — and those must not linger in a browser cache.
  */
 private suspend fun RoutingCall.respondStatusPage(page: StatusPageConfig, statuses: List<MonitorStatus>, showDetails: Boolean) {
+    if (showDetails) response.header(HttpHeaders.CacheControl, "no-store")
     respondHtml {
         head {
             meta(charset = "UTF-8")

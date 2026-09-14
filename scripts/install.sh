@@ -172,7 +172,7 @@ Without `config.json` Argos runs in bootstrap mode: `/` answers 503 and the setu
    sudo systemctl restart argos
    ```
 3. Verify: `curl -i http://127.0.0.1:8080/` answers `200`. A `503` means the configuration was
-   rejected; the response body and `sudo journalctl -u argos` list the reasons.
+   rejected; `sudo journalctl -u argos` lists the reasons.
 
 Every change to `config.json` needs `sudo systemctl restart argos` (no hot reload).
 
