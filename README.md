@@ -35,7 +35,7 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
   - System events (`Argos started`, `Argos: unexpected offline period`, `Argos: scheduler paused`) go to every channel with `systemEvents: true`.
 - **Status pages**
   - Server-side rendered HTML (`kotlinx.html`), no JavaScript: name, UP/DOWN/UNKNOWN, last latency, time of the last check (`dd.MM.yyyy HH:mm:ss UTC`); auto-refresh every 30 s; light and dark theme.
-  - 30-day history per monitor as an inline SVG bar chart: one bar per UTC day, height = average latency of the successful checks, red as soon as one check failed that day (full height when none succeeded), grey for days without data; hovering a bar shows date, uptime, failed/total and the average.
+  - 30-day history per monitor as an inline SVG bar chart: one bar per UTC day, height = average latency of the successful checks, red as soon as one check failed that day (full height when none succeeded), grey for days without data; hovering a bar shows date, uptime, failed/total and the average. The aggregation is cached for 60 s per monitor, so tabs and anonymous requests cannot multiply it; the status row above it is always live.
   - Optional per-page **HTTP Basic Auth** with **Argon2id** password hashes. Error details (which name internal hosts and ports) are shown on authenticated pages only.
 - **Configuration editor**
   - Browser UI at `/setup` that covers the whole `config.json`: monitors, SMTP and webhook channels, status pages (including Basic Auth) and the general settings, each field with a short explanation. Start from scratch or load an existing file, then download or copy the result.

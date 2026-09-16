@@ -95,7 +95,9 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
   `build.gradle.kts`): Exposed schreibt SQLite-Zeitstempel als Text in der JVM-Default-Zone — nur in UTC bleibt die
   Sortierung über DST-Wechsel korrekt und `date(timestamp)` liefert UTC-Tage. Anzeige ebenfalls UTC mit Suffix.
 - Status-Page-Verlauf: `dailySummaries` (db/CheckHistory.kt) aggregiert pro Tag in SQL (`GROUP BY date(timestamp)`),
-  `StatusService` polstert auf `HISTORY_DAYS` (Tage ohne Daten = `checks == 0`), `web/HistoryChart.kt` rendert das
+  `StatusService` polstert auf `HISTORY_DAYS` (Tage ohne Daten = `checks == 0`) und cacht das Ergebnis `HISTORY_CACHE_TTL`
+  lang pro Monitor (~12 ms pro Query bei Minuten-Checks — ungecacht wäre jede öffentliche Seite ein CPU-Verstärker),
+  `web/HistoryChart.kt` rendert das
   Inline-SVG — nur Zahlen/Daten im Markup, deshalb `raw` auch auf öffentlichen Seiten erlaubt. Kein JavaScript.
 - Config-Editor unter `/setup` (`resources/static/`, via `staticResources`): rein clientseitig, deckt die ganze
   `AppConfig` ab, lädt/speichert nie etwas am Server (Upload = `FileReader`, Download = Blob). `config-model.js`
