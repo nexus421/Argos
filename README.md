@@ -53,7 +53,7 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
 - **Database:** Exposed 1.5.0 + SQLite JDBC 3.53.4.0 + HikariCP 6.3.0 — WAL mode, 5 s busy timeout, single-threaded writer
 - **Mail:** Jakarta Mail 2.0.2
 - **Logging & utilities:** `bayern.kickner:Klogger:0.1.0` (application log, stdout), SLF4J Simple (framework warnings), `bayern.kickner:KotNexLib:4.4.1` (Argon2, CLI args, `ResultOf2`)
-- **Tests:** Kotest 5.9.1, Ktor `MockEngine` / `testApplication` (Mockk is declared but currently unused); GraalJS 25 (test scope only) runs the setup page's `config-model.js` inside Kotest to check its validation against the server's
+- **Tests:** Kotest 5.9.1, Ktor `MockEngine` / `testApplication`; GraalJS 25 (test scope only) runs the setup page's `config-model.js` inside Kotest to check its validation against the server's
 
 ---
 

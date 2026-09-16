@@ -38,7 +38,7 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
 - Kotlin JVM Plugin 2.4.10, Ktor-Plugin 3.5.2.
 - JVM-Toolchain: Amazon Corretto 25, Vendor gepinnt über `JvmVendorSpec.AMAZON`.
 - Gradle 9.6 via Wrapper.
-- Test-Framework: Kotest (JUnit-Platform), Mockk für Mocks.
+- Test-Framework: Kotest (JUnit-Platform); Ktor `MockEngine` statt einer Mocking-Library.
 - Group/Koordinaten: `bayern.kickner:Argos`, Version steht in `build.gradle.kts` (`version = "…"`).
 - Zusätzliches Maven-Repo `nexus421MavenReleases` für `bayern.kickner:Klogger`/`KotNexLib`.
 
