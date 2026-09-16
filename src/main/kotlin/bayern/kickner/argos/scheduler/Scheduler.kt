@@ -176,7 +176,7 @@ class Scheduler(
 
         val text = when (transition(monitor.id, result.success)) {
             TriggerDecision.SendDownNotification ->
-                AlertText(MonitorEvent.DOWN, "${monitor.name} is DOWN", result.message ?: "No detail provided")
+                AlertText(MonitorEvent.DOWN, "${monitor.name} is DOWN", "Detected at $finishedAt. ${result.message ?: "No detail provided"}")
             TriggerDecision.SendRecoveryNotification ->
                 AlertText(MonitorEvent.UP, "${monitor.name} is UP again", recoveryBody(downSince, finishedAt))
             TriggerDecision.None -> null

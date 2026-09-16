@@ -15,6 +15,7 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldStartWith
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -79,6 +80,8 @@ class SchedulerTest : FunSpec({
             pendingAlerts(harness.db.database).shouldBeEmpty()                        // confirmed -> row removed
             latestResults(harness.db.database, "m1", 10).size shouldBeGreaterThan 1   // next ticks ran: inFlight was released
         }
+        // A redelivered DOWN would otherwise look like a fresh one; webhooks carry no timestamp of their own
+        harness.deliveries.single().substringAfter('|') shouldStartWith "Detected at 20"
         harness.close()
     }
 
