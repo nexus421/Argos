@@ -24,6 +24,12 @@ class HistoryChartTest : FunSpec({
         Regex("""height="(\d+)"""").findAll(svg).map { it.groupValues[1].toInt() }.toList() shouldBe listOf(38, 19, 38, 2)
     }
 
+    test("days whose successful checks all took 0.0 ms are drawn at minimum height instead of failing on NaN") {
+        val svg = renderHistorySvg(listOf(DaySummary(day, 10, 0, 0.0), DaySummary(day.plusDays(1), 10, 1, 0.0)))
+
+        Regex("""height="(\d+)"""").findAll(svg).map { it.groupValues[1].toInt() }.toList() shouldBe listOf(2, 2)
+    }
+
     test("every bar carries a tooltip with date, uptime, failures and average latency") {
         val svg = renderHistorySvg(listOf(noData(day.minusDays(1)), DaySummary(day, 1440, 3, 240.0), DaySummary(day.plusDays(1), 5, 5, null)))
 

@@ -114,9 +114,10 @@ class SchedulerTest : FunSpec({
         harness.scope.cancel() // stop the ticker so only the explicit passes below touch the queue
 
         harness.endpointDown.set(false)
-        coroutineScope { repeat(5) { launch { harness.scheduler.redeliverPendingAlerts() } } }
-
+        // Same window as above: the first delivery may still hold its claim, so fire the five concurrent passes
+        // until one round gets through — the "exactly one DOWN" assertion is what proves the claim logic.
         eventually(6.seconds) {
+            coroutineScope { repeat(5) { launch { harness.scheduler.redeliverPendingAlerts() } } }
             pendingAlerts(harness.db.database).shouldBeEmpty()
             harness.deliveries.map { it.substringBefore('|') } shouldBe listOf("DOWN")
         }

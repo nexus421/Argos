@@ -23,12 +23,14 @@ private val dayFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yy
  */
 fun renderHistorySvg(history: List<DaySummary>): String {
     val slowest = history.mapNotNull { it.averageOkMillis }.maxOrNull() ?: 0.0
+    // Guards the NaN of 0.0 / 0.0 (every successful check at 0.000 ms), which roundToInt would throw on
+    fun scaled(average: Double) = if (slowest > 0.0) (average / slowest * MAX_BAR_HEIGHT).roundToInt().coerceAtLeast(MIN_BAR_HEIGHT) else MIN_BAR_HEIGHT
     val bars = history.mapIndexed { index, day ->
         val average = day.averageOkMillis
         val (css, height) = when {
             day.checks == 0 -> "nodata" to MIN_BAR_HEIGHT
             average == null -> "failed" to MAX_BAR_HEIGHT
-            else -> (if (day.failed > 0) "failed" else "ok") to (average / slowest * MAX_BAR_HEIGHT).roundToInt().coerceAtLeast(MIN_BAR_HEIGHT)
+            else -> (if (day.failed > 0) "failed" else "ok") to scaled(average)
         }
         val x = index * BAR_STEP + (BAR_STEP - BAR_WIDTH) / 2
         """<rect class="bar-$css" x="$x" y="${CHART_HEIGHT - height}" width="$BAR_WIDTH" height="$height"><title>${day.tooltip()}</title></rect>"""
