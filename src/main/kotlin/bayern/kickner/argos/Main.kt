@@ -156,8 +156,7 @@ fun main(args: Array<String>) {
 }
 
 /**
- * Sends one real ICMP echo to loopback with the selected backend. Without ICMP the JDK fallback degrades to a
- * TCP-port-7 probe whose result only reflects whether the target answers that port with RST — meaningless.
+ * Logs an error when ping monitors cannot work: no `ping` binary, or one that cannot reach loopback.
  */
 private fun warnIfIcmpUnavailable(config: AppConfig) {
     val pingMonitors = config.monitors.filter { it.check is PingCheckConfig }
