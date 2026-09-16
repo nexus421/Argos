@@ -1,5 +1,6 @@
 package bayern.kickner.argos
 
+import bayern.kickner.argos.checks.clientWithRedirects
 import bayern.kickner.argos.checks.defaultPingBackend
 import bayern.kickner.argos.checks.probeIcmp
 import bayern.kickner.argos.config.AppConfig
@@ -18,8 +19,6 @@ import bayern.kickner.argos.web.configureWeb
 import bayern.kickner.argos.web.hashPassword
 import bayern.kickner.klogger.KLogger
 import bayern.kickner.klogger.staticLog
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO as ClientCIO
 import io.ktor.server.cio.CIO as ServerCIO
 import io.ktor.server.engine.embeddedServer
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -94,7 +93,8 @@ fun main(args: Array<String>) {
         return
     }
     val database = appDatabase.database
-    val httpClient = HttpClient(ClientCIO)
+    // Same client as the HTTP checks: only withTimeoutOrNull in sendWebhook ends a delivery; CIO's own timeout messages carry the URL (token)
+    val httpClient = clientWithRedirects
     val notificationDispatcher = NotificationDispatcher(appConfig ?: AppConfig(), httpClient)
 
     val exceptionHandler = CoroutineExceptionHandler { _, throwable ->

@@ -252,10 +252,10 @@ class ConfigLoaderTest : FunSpec({
               "webhookChannels": [ { "id": "w1", "url": "hooks.example/x", "method": "", "bodyTemplate": "{}" } ]
             }"""
         )
-        issues shouldContain "Monitor 'h1': url 'example.com/health' must start with http:// or https:// and contain no whitespace"
+        issues shouldContain "Monitor 'h1': url must start with http:// or https:// and contain no whitespace"
         issues shouldContain "Monitor 'h1': method 'G3T' must be an HTTP method name such as GET or POST"
         issues shouldContain "Monitor 'h1': expectedStatusCodes [999, 0] must be between 100 and 599"
-        issues shouldContain "Webhook channel 'w1': url 'hooks.example/x' must start with http:// or https:// and contain no whitespace"
+        issues shouldContain "Webhook channel 'w1': url must start with http:// or https:// and contain no whitespace"
         issues shouldContain "Webhook channel 'w1': method '' must be an HTTP method name such as GET or POST"
     }
 

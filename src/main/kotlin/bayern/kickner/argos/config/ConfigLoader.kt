@@ -163,7 +163,7 @@ private fun validate(config: AppConfig): List<String> {
 
     fun checkUrl(owner: String, url: String) {
         if (url.isBlank()) issues += "$owner: url must not be blank"
-        else if (urlPattern.matches(url).not()) issues += "$owner: url '$url' must start with http:// or https:// and contain no whitespace"
+        else if (urlPattern.matches(url).not()) issues += "$owner: url must start with http:// or https:// and contain no whitespace"
     }
 
     fun checkMethod(owner: String, method: String) {

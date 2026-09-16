@@ -34,7 +34,8 @@ internal fun checkClient(followRedirects: Boolean): HttpClient = HttpClient(CIO)
     }
 }
 
-private val clientWithRedirects by lazy { checkClient(followRedirects = true) }
+/** Shared with webhook delivery ([bayern.kickner.argos.notify.sendWebhook]): a CIO default timeout would surface Ktor's message with the full URL (token) in the log. */
+internal val clientWithRedirects by lazy { checkClient(followRedirects = true) }
 private val clientWithoutRedirects by lazy { checkClient(followRedirects = false) }
 private val compiledRegexes = ConcurrentHashMap<String, Regex>()
 

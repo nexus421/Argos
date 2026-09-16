@@ -77,7 +77,9 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
 - Ktor-Shutdown-Hook ist per Property aus (`io.ktor.server.engine.ShutdownHook=false`); die Stop-Reihenfolge
   (Server → Checks → Zustellungen bis 30 s → Heartbeat → DB) steht in Main.kt.
 - Ktor-CIO-Client für Checks: `requestTimeout = 0`, `connectTimeout = INFINITE` — nur das `withTimeout` des
-  Checks darf einen Request beenden (`checks/HttpCheck.kt`).
+  Checks darf einen Request beenden (`checks/HttpCheck.kt`). Derselbe Client (`clientWithRedirects`) bedient auch
+  die Webhooks: Ktors eigene Timeout-Exceptions tragen die volle URL (Token) in der Message, die im Log landen würde.
+  Keinen dritten `HttpClient` anlegen. Validierungsmeldungen enthalten ebenfalls keine URLs.
 - `runCatching` in Coroutinen immer mit `.rethrowCancellation()` (`Coroutines.kt`), sonst wird ein
   Shutdown als fehlgeschlagener Check/Versand geloggt.
 - Öffentliche Status-Pages (ohne `basicAuth`) zeigen keine Fehlertexte — die nennen interne Hosts/Ports.

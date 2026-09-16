@@ -217,7 +217,7 @@ const ArgosConfigModel = (() => {
 
     function checkUrl(owner, url) {
       if (isBlank(url)) issues.push(`${owner}: url must not be blank`);
-      else if (URL_PATTERN.test(String(url)) === false) issues.push(`${owner}: url '${url}' must start with http:// or https:// and contain no whitespace`);
+      else if (URL_PATTERN.test(String(url)) === false) issues.push(`${owner}: url must start with http:// or https:// and contain no whitespace`);
     }
 
     function checkMethod(owner, method) {
