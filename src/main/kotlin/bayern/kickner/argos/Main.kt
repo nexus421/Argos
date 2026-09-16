@@ -71,31 +71,24 @@ fun main(args: Array<String>) {
     }
 
     val configPath = parsedArgs.getValue("configPath") ?: "./config.json"
-    val configResult = loadConfig(configPath)
-    val appConfig = (configResult as? ResultOf2.Success)?.value
-    val configError = (configResult as? ResultOf2.Failure)?.value
-
-    if (appConfig == null) {
-        staticLog(KLogger.Level.ERROR, TAG) { "Could not load configuration ($configResult) — server starting in empty state." }
+    val config = when (val result = loadConfig(configPath)) {
+        is ResultOf2.Success -> result.value
+        is ResultOf2.Failure -> {
+            staticLog(KLogger.Level.ERROR, TAG) { "Could not load configuration (${result.value}) — server starting in empty state." }
+            AppConfig().let { defaults -> serveBootstrap(defaults.webHost, defaults.webPort, result.value) }
+            return
+        }
     }
 
-    val webHost = appConfig?.webHost ?: "0.0.0.0"
-    val webPort = appConfig?.webPort ?: 8080
-
-    val dataDir = appConfig?.dataDir ?: "./data"
-    val appDatabase = runCatching { connectDatabase(dataDir) }.getOrElse { failure ->
-        // Same degradation as an invalid config: `/` answers 503 with the category, systemd sees no crash loop
-        staticLog(KLogger.Level.ERROR, TAG) { "Could not open the database in '$dataDir': ${failure.message} — server starting in empty state." }
-        val error = ConfigError.DataDirUnusable(failure.message ?: failure::class.simpleName ?: "unknown")
-        embeddedServer(ServerCIO, host = webHost, port = webPort) {
-            configureWeb(null, StatusSource { emptyList() }, error)
-        }.start(wait = true)
+    val appDatabase = runCatching { connectDatabase(config.dataDir) }.getOrElse { failure ->
+        staticLog(KLogger.Level.ERROR, TAG) { "Could not open the database in '${config.dataDir}': ${failure.message} — server starting in empty state." }
+        serveBootstrap(config.webHost, config.webPort, ConfigError.DataDirUnusable(failure.message ?: failure::class.simpleName ?: "unknown"))
         return
     }
     val database = appDatabase.database
     // Same client as the HTTP checks: only withTimeoutOrNull in sendWebhook ends a delivery; CIO's own timeout messages carry the URL (token)
     val httpClient = clientWithRedirects
-    val notificationDispatcher = NotificationDispatcher(appConfig ?: AppConfig(), httpClient)
+    val notificationDispatcher = NotificationDispatcher(config, httpClient)
 
     val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
         staticLog(KLogger.Level.ERROR, TAG) { "Unhandled error in background job: ${throwable::class.simpleName}: ${throwable.message}" }
@@ -108,7 +101,7 @@ fun main(args: Array<String>) {
     val startedAt = Instant.now()
     runBlocking {
         val lastHeartbeat = readLastHeartbeat(database)
-        val gap = hasUnplannedGap(lastHeartbeat, startedAt, appConfig?.heartbeatGapMinutesThreshold ?: 2)
+        val gap = hasUnplannedGap(lastHeartbeat, startedAt, config.heartbeatGapMinutesThreshold)
 
         if (gap) {
             staticLog(KLogger.Level.WARN, TAG) { "Unexpected restart detected. Last heartbeat: $lastHeartbeat" }
@@ -123,17 +116,12 @@ fun main(args: Array<String>) {
     }
     notificationScope.launch { notificationDispatcher.sendSystemNotification(subject = "Argos started", body = "Started at $startedAt") }
 
-    val scheduler = appConfig?.let { config ->
-        warnIfIcmpUnavailable(config)
-        Scheduler(config, database, appScope, notificationScope, notificationDispatcher).also { runBlocking { it.restoreState() } }
-    }
-    scheduler?.start()
+    warnIfIcmpUnavailable(config)
+    val scheduler = Scheduler(config, database, appScope, notificationScope, notificationDispatcher).also { runBlocking { it.restoreState() } }
+    scheduler.start()
 
-    val statusSource: StatusSource = appConfig?.let { StatusService(it, database) { id -> scheduler?.stateOf(id) } }
-        ?: StatusSource { emptyList() }
-
-    val server = embeddedServer(ServerCIO, host = webHost, port = webPort) {
-        configureWeb(appConfig, statusSource, configError)
+    val server = embeddedServer(ServerCIO, host = config.webHost, port = config.webPort) {
+        configureWeb(config, StatusService(config, database, scheduler::stateOf))
     }
 
     Runtime.getRuntime().addShutdownHook(Thread {
@@ -153,6 +141,16 @@ fun main(args: Array<String>) {
     })
 
     server.start(wait = true)
+}
+
+/**
+ * Bootstrap state: `/setup` and a 503 on `/`, nothing else. No database and no heartbeat either — monitoring is
+ * not running, so the gap is real and gets reported once a valid configuration starts. systemd sees no crash loop.
+ */
+private fun serveBootstrap(host: String, port: Int, error: ConfigError) {
+    embeddedServer(ServerCIO, host = host, port = port) {
+        configureWeb(null, StatusSource { emptyList() }, error)
+    }.start(wait = true)
 }
 
 /**

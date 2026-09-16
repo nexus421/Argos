@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotnexlib.ResultOf2
 import java.io.File
 import java.net.InetAddress
@@ -86,7 +87,7 @@ fun loadConfig(path: String): ResultOf2<AppConfig, ConfigError> {
 
     val tree = runCatching { json.parseToJsonElement(text) }
         .getOrElse { return ResultOf2.Failure(ConfigError.ParseError(sanitizeParseMessage(it.message))) }
-    val parsed = runCatching { json.decodeFromString<AppConfig>(text) }
+    val parsed = runCatching { json.decodeFromJsonElement<AppConfig>(tree) }
         .getOrElse { return ResultOf2.Failure(ConfigError.ParseError(sanitizeParseMessage(it.message))) }
 
     val issues = unknownFieldIssues(tree) + validate(parsed)

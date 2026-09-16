@@ -40,7 +40,6 @@ dependencies {
     // SLF4J provider so Ktor/Hikari/Exposed warnings reach the journal (level set in Main.kt)
     runtimeOnly("org.slf4j:slf4j-simple:2.0.18")
 
-    testImplementation(kotlin("test"))
     testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
     testImplementation("io.kotest:kotest-assertions-core:5.9.1")
     testImplementation("io.ktor:ktor-server-test-host:3.5.2")

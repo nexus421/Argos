@@ -17,7 +17,6 @@ import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.io.readByteArray
-import java.util.concurrent.ConcurrentHashMap
 
 /** Upper bound of response bytes inspected by `bodyRegex`; protects the heap against huge responses. */
 const val HTTP_BODY_LIMIT_BYTES = 1024 * 1024
@@ -37,7 +36,6 @@ internal fun checkClient(followRedirects: Boolean): HttpClient = HttpClient(CIO)
 /** Shared with webhook delivery ([bayern.kickner.argos.notify.sendWebhook]): a CIO default timeout would surface Ktor's message with the full URL (token) in the log. */
 internal val clientWithRedirects by lazy { checkClient(followRedirects = true) }
 private val clientWithoutRedirects by lazy { checkClient(followRedirects = false) }
-private val compiledRegexes = ConcurrentHashMap<String, Regex>()
 
 /**
  * Executes an HTTP/HTTPS request according to [config] and validates status code and body regex.
@@ -87,8 +85,7 @@ private suspend fun evaluate(config: HttpCheckConfig, response: HttpResponse): L
     if (statusOk.not()) problems += "HTTP ${response.status.value} not in expected ${config.expectedStatusCodes}"
 
     val pattern = config.bodyRegex ?: return problems
-    val regex = compiledRegexes.getOrPut(pattern) { Regex(pattern) }
-    val bodyOk = regex.containsMatchIn(readBodyPrefix(response))
+    val bodyOk = Regex(pattern).containsMatchIn(readBodyPrefix(response))
     if (bodyOk.not()) problems += "bodyRegex '$pattern' did not match (first $HTTP_BODY_LIMIT_BYTES bytes inspected)"
 
     return problems

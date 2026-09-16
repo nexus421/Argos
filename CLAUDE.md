@@ -62,7 +62,9 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
 - Config-Validierung ist hart: alles, was den Scheduler crashen oder Alerts still verschlucken könnte,
   lehnt `loadConfig` ab — auch unbekannte Keys (`Unknown field 'x' in path`). Parse-Fehler nie mit JSON-Inhalt
   loggen (Secrets). Ohne gültige Config (oder ohne nutzbares `dataDir`) läuft der Server im Bootstrap-Zustand
-  weiter, `/` antwortet dann 503 nur mit der Kategorie (kein Exit, kein Restart-Loop); Details stehen nur im Log.
+  weiter (`serveBootstrap` in Main.kt): nur `/setup` und 503 auf `/` mit der Kategorie, keine DB, kein Heartbeat —
+  die Überwachungslücke wird nach dem nächsten gültigen Start als Gap gemeldet (kein Exit, kein Restart-Loop);
+  Details stehen nur im Log.
   Neue Config-Regel = `ConfigLoader.validate` **und** `config-model.js` **und** ein `InvalidCase` in
   `ConfigModelJsTest`, mit identischem Meldungstext. Neues Feld = zusätzlich in `*_KEYS` / `KNOWN_KEYS`.
 - Alerts nie direkt zustellen: `recordCheck` speichert Ergebnis + `pending_alert` atomar, Zustellung läuft im
