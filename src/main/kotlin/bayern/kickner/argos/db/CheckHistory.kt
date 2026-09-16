@@ -9,7 +9,6 @@ import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.andWhere
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
-import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import java.time.Instant
@@ -30,19 +29,6 @@ data class CheckHistoryEntry(
     val responseTimeMs: Double,
     val errorMessage: String?
 )
-
-/**
- * Persists a check outcome; over-long error messages are truncated instead of failing the insert.
- */
-suspend fun insertCheckResult(database: Database, entry: CheckHistoryEntry) = dbWrite(database) {
-    CheckHistoryTable.insert {
-        it[monitorId] = entry.monitorId
-        it[timestamp] = entry.timestamp
-        it[success] = entry.success
-        it[responseTimeMs] = entry.responseTimeMs
-        it[errorMessage] = entry.errorMessage?.take(ERROR_MESSAGE_MAX_LENGTH)
-    }
-}
 
 /**
  * Returns the newest [limit] results of one monitor, newest first.

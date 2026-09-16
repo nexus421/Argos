@@ -6,7 +6,7 @@ import bayern.kickner.argos.config.StatusPageConfig
 import bayern.kickner.argos.config.TcpCheckConfig
 import bayern.kickner.argos.db.CheckHistoryEntry
 import bayern.kickner.argos.db.connectDatabase
-import bayern.kickner.argos.db.insertCheckResult
+import bayern.kickner.argos.db.recordCheck
 import bayern.kickner.argos.notify.MonitorRuntimeState
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -27,9 +27,9 @@ class StatusServiceTest : FunSpec({
     test("combines latest stored result with runtime trigger state") {
         val appDatabase = connectDatabase(Files.createTempDirectory("argos-status").toFile().absolutePath)
         val at = Instant.parse("2026-01-01T12:00:00Z")
-        insertCheckResult(appDatabase.database, CheckHistoryEntry("up", at.minusSeconds(60), false, 1.0, "old failure"))
-        insertCheckResult(appDatabase.database, CheckHistoryEntry("up", at, true, 12.0, null))
-        insertCheckResult(appDatabase.database, CheckHistoryEntry("down", at, false, 5000.0, "Connection refused"))
+        recordCheck(appDatabase.database, CheckHistoryEntry("up", at.minusSeconds(60), false, 1.0, "old failure"), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("up", at, true, 12.0, null), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("down", at, false, 5000.0, "Connection refused"), null)
         val states = mapOf(
             "up" to MonitorRuntimeState(0, currentlyDown = false),
             "down" to MonitorRuntimeState(3, currentlyDown = true),
