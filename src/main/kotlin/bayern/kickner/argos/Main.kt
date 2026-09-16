@@ -1,7 +1,7 @@
 package bayern.kickner.argos
 
 import bayern.kickner.argos.checks.clientWithRedirects
-import bayern.kickner.argos.checks.defaultPingBackend
+import bayern.kickner.argos.checks.defaultPingBinary
 import bayern.kickner.argos.checks.probeIcmp
 import bayern.kickner.argos.config.AppConfig
 import bayern.kickner.argos.config.ConfigError
@@ -162,8 +162,12 @@ fun main(args: Array<String>) {
 private fun warnIfIcmpUnavailable(config: AppConfig) {
     val pingMonitors = config.monitors.filter { it.check is PingCheckConfig }
     if (pingMonitors.isEmpty()) return
-    val backend = defaultPingBackend
-    staticLog(KLogger.Level.INFO, TAG) { "Ping backend: $backend" }
-    val reason = probeIcmp(backend) ?: return
+    val binary = defaultPingBinary
+    if (binary == null) {
+        staticLog(KLogger.Level.ERROR, TAG) { "No ping binary found — ping monitors ${pingMonitors.map { it.id }} will fail; install iputils-ping." }
+        return
+    }
+    staticLog(KLogger.Level.INFO, TAG) { "Ping binary: $binary" }
+    val reason = probeIcmp(binary) ?: return
     staticLog(KLogger.Level.ERROR, TAG) { "ICMP is not available — ping monitors ${pingMonitors.map { it.id }} will not deliver meaningful results: $reason" }
 }

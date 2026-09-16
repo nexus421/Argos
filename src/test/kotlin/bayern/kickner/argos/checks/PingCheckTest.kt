@@ -9,7 +9,6 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.types.shouldBeInstanceOf
 import java.io.File
 import java.nio.file.Files
 
@@ -62,26 +61,21 @@ class PingOutputParsingTest : FunSpec({
     }
 })
 
-class PingBackendDetectionTest : FunSpec({
+class PingBinaryDetectionTest : FunSpec({
 
-    test("uses the first executable candidate on Linux") {
+    test("uses the first executable candidate") {
         val binary = fakePing("exit 0")
-        detectPingBackend(osName = "Linux", candidates = listOf("/nonexistent/ping", binary), path = "") shouldBe PingBackend.Binary(binary)
+        detectPingBinary(candidates = listOf("/nonexistent/ping", binary), path = "") shouldBe binary
     }
 
     test("searches PATH when no candidate matches") {
         val dir = Files.createTempDirectory("fake-ping-dir").toFile()
         val binary = File(dir, "ping").apply { writeText("#!/bin/sh\nexit 0\n"); setExecutable(true) }
-        detectPingBackend(osName = "Linux", candidates = emptyList(), path = "/nonexistent:${dir.absolutePath}") shouldBe PingBackend.Binary(binary.absolutePath)
+        detectPingBinary(candidates = emptyList(), path = "/nonexistent:${dir.absolutePath}") shouldBe binary.absolutePath
     }
 
-    test("falls back to the JDK when no candidate is executable") {
-        detectPingBackend(osName = "Linux", candidates = listOf("/nonexistent/ping"), path = "") shouldBe PingBackend.Jdk
-    }
-
-    test("never uses a binary on non-Linux systems") {
-        val binary = fakePing("exit 0")
-        detectPingBackend(osName = "Mac OS X", candidates = listOf(binary)) shouldBe PingBackend.Jdk
+    test("yields null when no candidate is executable") {
+        detectPingBinary(candidates = listOf("/nonexistent/ping"), path = "").shouldBeNull()
     }
 })
 
@@ -90,7 +84,7 @@ class PingBinaryExecutionTest : FunSpec({
     test("a replying host is UP with the RTT from the tool") {
         val binary = fakePing("cat <<'OUT'\n$SUCCESS_OUTPUT\nOUT\nexit 0")
 
-        val result = executePingCheck(PingCheckConfig("127.0.0.1"), timeoutSeconds = 2, backend = PingBackend.Binary(binary))
+        val result = executePingCheck(PingCheckConfig("127.0.0.1"), timeoutSeconds = 2, binary = binary)
 
         result.success shouldBe true
         result.responseTimeMs shouldBe 0.036
@@ -100,7 +94,7 @@ class PingBinaryExecutionTest : FunSpec({
         val argsFile = Files.createTempFile("fake-ping-args", ".txt").toFile()
         val binary = fakePing("echo \"\$@\" > ${argsFile.absolutePath}\nexit 1")
 
-        executePingCheck(PingCheckConfig("-evil.example"), timeoutSeconds = 3, backend = PingBackend.Binary(binary))
+        executePingCheck(PingCheckConfig("-evil.example"), timeoutSeconds = 3, binary = binary)
 
         argsFile.readText().trim() shouldBe "-c 1 -W 3 -n -- -evil.example"
     }
@@ -108,17 +102,24 @@ class PingBinaryExecutionTest : FunSpec({
     test("a silent host is DOWN") {
         val binary = fakePing("echo '1 packets transmitted, 0 received, 100% packet loss, time 0ms'\nexit 1")
 
-        val result = executePingCheck(PingCheckConfig("192.0.2.1"), timeoutSeconds = 1, backend = PingBackend.Binary(binary))
+        val result = executePingCheck(PingCheckConfig("192.0.2.1"), timeoutSeconds = 1, binary = binary)
 
         result.success shouldBe false
         result.message shouldContain "No ICMP reply"
+    }
+
+    test("without a ping binary the check fails and says so") {
+        val result = executePingCheck(PingCheckConfig("127.0.0.1"), timeoutSeconds = 2, binary = null)
+
+        result.success shouldBe false
+        result.message shouldBe "No ping binary found (iputils ping required)"
     }
 
     test("a hanging binary is killed after the timeout and reported as timed out") {
         val binary = fakePing("sleep 30\nexit 0")
         val start = System.currentTimeMillis()
 
-        val result = executePingCheck(PingCheckConfig("10.0.0.1"), timeoutSeconds = 1, backend = PingBackend.Binary(binary))
+        val result = executePingCheck(PingCheckConfig("10.0.0.1"), timeoutSeconds = 1, binary = binary)
 
         result.success shouldBe false
         result.message shouldContain "timed out"
@@ -126,7 +127,7 @@ class PingBinaryExecutionTest : FunSpec({
     }
 
     test("the real iputils ping reaches loopback without privileges").config(enabled = File("/usr/bin/ping").canExecute()) {
-        val result = executePingCheck(PingCheckConfig("127.0.0.1"), timeoutSeconds = 2, backend = PingBackend.Binary("/usr/bin/ping"))
+        val result = executePingCheck(PingCheckConfig("127.0.0.1"), timeoutSeconds = 2, binary = "/usr/bin/ping")
 
         result.success shouldBe true
         result.responseTimeMs shouldBeGreaterThan 0.0
@@ -136,18 +137,12 @@ class PingBinaryExecutionTest : FunSpec({
 
 class IcmpProbeTest : FunSpec({
 
-    test("binary backend probe passes when the tool answers exit 0") {
-        probeIcmp(PingBackend.Binary(fakePing("exit 0"))).shouldBeNull()
+    test("the probe passes when the tool answers exit 0") {
+        probeIcmp(fakePing("exit 0")).shouldBeNull()
     }
 
-    test("binary backend probe reports the tool's error when ICMP is refused") {
-        val reason = probeIcmp(PingBackend.Binary(fakePing("echo 'ping: socket: Operation not permitted'\nexit 2")))
+    test("the probe reports the tool's error when ICMP is refused") {
+        val reason = probeIcmp(fakePing("echo 'ping: socket: Operation not permitted'\nexit 2"))
         reason.shouldNotBeNull() shouldContain "Operation not permitted"
-    }
-
-    test("JDK backend probe reflects the process capabilities") {
-        val reason = probeIcmp(PingBackend.Jdk)
-        val capable = hasNetRawCapability(File("/proc/self/status").readText())
-        if (capable) reason.shouldBeNull() else reason.shouldNotBeNull() shouldContain "CAP_NET_RAW"
     }
 })

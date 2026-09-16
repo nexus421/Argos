@@ -83,11 +83,11 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
 - `runCatching` in Coroutinen immer mit `.rethrowCancellation()` (`Coroutines.kt`), sonst wird ein
   Shutdown als fehlgeschlagener Check/Versand geloggt.
 - Öffentliche Status-Pages (ohne `basicAuth`) zeigen keine Fehlertexte — die nennen interne Hosts/Ports.
-- Ping läuft unter Linux über `/usr/bin/ping` per `ProcessBuilder` (`checks/PingCheck.kt`, `PingBackend`):
+- Zielplattform ist ausschließlich Linux — kein Code für Windows/macOS.
+- Ping läuft über `/usr/bin/ping` (iputils) per `ProcessBuilder` (`checks/PingCheck.kt`, `defaultPingBinary`):
   kein root nötig, echte RTT aus `time=`, UP/DOWN aus dem Exit-Code, `LC_ALL=C`, Host hinter `--`,
-  `destroyForcibly` nach Timeout. JDK-`isReachable` nur als Fallback ohne Binary; das braucht CAP_NET_RAW,
-  sonst still TCP-Port-7 (RST = „up", Drop = „down") — Probe dafür ist `CapEff` in `/proc/self/status`,
-  nie `isReachable(loopback)`. Latenzen sind `Double`-Millisekunden aus `nanoTime`.
+  `destroyForcibly` nach Timeout. Ohne Binary schlägt der Check fehl (kein JDK-`isReachable`-Fallback: der
+  braucht CAP_NET_RAW, sonst still TCP-Port-7). Latenzen sind `Double`-Millisekunden aus `nanoTime`.
 - DNS-Caching ist per `Security.setProperty(...)` in `Main.kt` abgeschaltet.
 - Config-Editor unter `/setup` (`resources/static/`, via `staticResources`): rein clientseitig, deckt die ganze
   `AppConfig` ab, lädt/speichert nie etwas am Server (Upload = `FileReader`, Download = Blob). `config-model.js`

@@ -4,7 +4,7 @@
 
 Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid) philosophy:
 
-- **No Docker required** — runs directly on a Java 25 runtime (Linux, macOS, Windows) or as a native `systemd` service.
+- **No Docker required** — runs directly on a Java 25 runtime on Linux, typically as a native `systemd` service.
 - **No login, no sessions, no mutation API** — monitors and channels are statically defined in a single, human-readable JSON configuration file. Changing it means restarting the process.
 - **Resilient & crash-proof** — boots even with a missing or invalid configuration (or an unusable data directory) and offers an interactive client-side setup helper. In that state `/` answers **503** naming the category of the problem (details are in the log), so an external health check notices that monitoring is not running.
 - **Low footprint** — Kotlin Coroutines with an epoch-aligned ticker, SQLite in WAL mode with serialized single-threaded writes, and lightweight server-side rendered status pages. Runs comfortably in 256 MiB of heap.
@@ -17,7 +17,7 @@ Built with Kotlin and Ktor, Argos follows a strict KISS (Keep It Simple, Stupid)
   - **HTTP/HTTPS** — custom method and headers, expected status codes, body regex (applied to the first 1 MiB of the response), configurable redirect following.
   - **TCP** — socket connection on any port.
   - All latencies are measured with `System.nanoTime()` and stored with sub-millisecond precision (`0.04 ms` on a LAN instead of `0 ms`).
-  - **ICMP / Ping** — on Linux via the system `ping` binary (works unprivileged, reports the real round-trip time with microsecond resolution); falls back to `InetAddress.isReachable` where no `ping` is found.
+  - **ICMP / Ping** — via the system `ping` binary (iputils; works unprivileged, reports the real round-trip time with microsecond resolution). Without a `ping` binary the check fails.
   - **DNS** — name resolution with optional expected IP address.
   - Every check honours `timeoutSeconds`, including the name resolution step.
 - **Alerting & notification channels**
@@ -344,7 +344,7 @@ Running the same command again in the same directory **updates** Argos: `config.
    ```
    `ERROR/Main` lines in the journal mean the configuration was rejected; `/` then returns 503 and the journal lists the issues.
 
-Running Argos as **`root`** is not a technical requirement: on Linux, ping monitors use the system `ping` binary (`/usr/bin/ping`, iputils), which carries the `cap_net_raw` file capability and therefore works for any user. To run unprivileged, set `User=` to an existing user that owns the directory — nothing else changes. Only where no `ping` binary exists does Argos fall back to `InetAddress.isReachable`, which needs `CAP_NET_RAW` (root or `AmbientCapabilities=CAP_NET_RAW`); without it the JDK silently probes TCP port 7 instead, which reports UP for hosts that answer with a reset and DOWN for hosts that drop the packet — nothing useful. At start Argos sends one real echo request to loopback with the selected backend and logs an error if that fails, plus an info line naming the backend.
+Running Argos as **`root`** is not a technical requirement: ping monitors use the system `ping` binary (`/usr/bin/ping`, iputils), which carries the `cap_net_raw` file capability and therefore works for any user. To run unprivileged, set `User=` to an existing user that owns the directory — nothing else changes. Without a `ping` binary every ping check fails (`No ping binary found`) and an error is logged at start — install `iputils-ping`. At start Argos sends one real echo request to loopback and logs an error if that fails, plus an info line naming the binary.
 
 The JVM is started with `--enable-native-access=ALL-UNNAMED` (sqlite-jdbc loads native code) and `-Xmx256m`.
 
