@@ -96,9 +96,10 @@ class SchedulerTest : FunSpec({
         harness.deliveries.shouldBeEmpty()
 
         harness.endpointDown.set(false)
-        harness.scheduler.redeliverPendingAlerts()
-
+        // The failed delivery releases its claim on the alert only after narrowing the row, and a pass that arrives
+        // in that window skips the alert by design — so keep triggering passes, as the periodic retry does.
         eventually(6.seconds) {
+            harness.scheduler.redeliverPendingAlerts()
             harness.deliveries.map { it.substringBefore('|') } shouldBe listOf("DOWN")
             pendingAlerts(harness.db.database).shouldBeEmpty()
         }

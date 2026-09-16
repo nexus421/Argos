@@ -33,6 +33,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotnexlib.ArgsInterpreter
 import kotnexlib.ResultOf2
 import java.time.Instant
+import java.util.TimeZone
 
 private const val TAG = "Main"
 
@@ -50,6 +51,9 @@ private const val NOTIFICATION_DRAIN_MILLIS = 30_000L
  * `hashPassword=<password>` to print an Argon2 hash for `statusPages[].basicAuth.passwordHash` and exit.
  */
 fun main(args: Array<String>) {
+    // Exposed writes SQLite timestamps as text in the JVM default zone. UTC keeps them sortable across DST changes
+    // and makes the status page's daily history UTC days. Must run before the first database access.
+    TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
     // Disable JVM DNS caching to ensure DNS changes are picked up immediately
     java.security.Security.setProperty("networkaddress.cache.ttl", "0")
     java.security.Security.setProperty("networkaddress.cache.negative.ttl", "0")

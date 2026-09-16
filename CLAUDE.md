@@ -91,6 +91,12 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
   `destroyForcibly` nach Timeout. Ohne Binary schlägt der Check fehl (kein JDK-`isReachable`-Fallback: der
   braucht CAP_NET_RAW, sonst still TCP-Port-7). Latenzen sind `Double`-Millisekunden aus `nanoTime`.
 - DNS-Caching ist per `Security.setProperty(...)` in `Main.kt` abgeschaltet.
+- Die JVM läuft in UTC (`TimeZone.setDefault` als erste Zeile in `main`, Tests per `-Duser.timezone=UTC` in
+  `build.gradle.kts`): Exposed schreibt SQLite-Zeitstempel als Text in der JVM-Default-Zone — nur in UTC bleibt die
+  Sortierung über DST-Wechsel korrekt und `date(timestamp)` liefert UTC-Tage. Anzeige ebenfalls UTC mit Suffix.
+- Status-Page-Verlauf: `dailySummaries` (db/CheckHistory.kt) aggregiert pro Tag in SQL (`GROUP BY date(timestamp)`),
+  `StatusService` polstert auf `HISTORY_DAYS` (Tage ohne Daten = `checks == 0`), `web/HistoryChart.kt` rendert das
+  Inline-SVG — nur Zahlen/Daten im Markup, deshalb `raw` auch auf öffentlichen Seiten erlaubt. Kein JavaScript.
 - Config-Editor unter `/setup` (`resources/static/`, via `staticResources`): rein clientseitig, deckt die ganze
   `AppConfig` ab, lädt/speichert nie etwas am Server (Upload = `FileReader`, Download = Blob). `config-model.js`
   ist DOM-frei und spiegelt `ConfigLoader.validate` samt Default-Werten und Meldungstexten 1:1 — jede neue

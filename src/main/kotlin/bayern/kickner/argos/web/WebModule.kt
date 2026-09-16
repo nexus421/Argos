@@ -37,12 +37,17 @@ import kotlinx.html.title
 import kotlinx.html.tr
 import kotlinx.html.unsafe
 import kotnexlib.crypto.Argon2Helper
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 /**
  * Argon2 verification costs ~64 MiB heap and ~100 ms each. One at a time keeps the worst case at 64 MiB of the
  * 256 MiB heap and the work off the scheduler's Default dispatcher; rate-limit the status pages in the reverse proxy.
  */
 private val argonDispatcher = Dispatchers.IO.limitedParallelism(1)
+
+/** Stored instants are UTC (Main.kt pins the JVM zone); shown as such so the page never depends on the viewer's zone. */
+private val lastCheckFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss 'UTC'").withZone(ZoneOffset.UTC)
 
 private const val STATUS_PAGE_CSS = """
 :root { color-scheme: light dark; --bg: #fff; --fg: #222; --line: #ddd; --muted: #6b7280; --up: #1a7f37; --down: #b91c1c; }
@@ -54,6 +59,11 @@ th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid var(--line)
 .DOWN { color: var(--down); font-weight: bold; }
 .UNKNOWN { color: var(--muted); font-weight: bold; }
 .muted { color: var(--muted); font-size: 0.9em; }
+tr.history td { padding-top: 0; }
+svg.history { display: block; width: 100%; height: 40px; }
+.bar-ok { fill: var(--up); }
+.bar-failed { fill: var(--down); }
+.bar-nodata { fill: var(--line); }
 """
 
 /**
@@ -175,7 +185,11 @@ private suspend fun RoutingCall.respondStatusPage(page: StatusPageConfig, status
                             }
                             td(classes = status.state.name) { +status.state.name }
                             td { +(status.responseTimeMs?.let { formatLatency(it) } ?: "–") }
-                            td { +(status.lastCheck?.toString() ?: "never") }
+                            td { +(status.lastCheck?.let { lastCheckFormat.format(it) } ?: "never") }
+                        }
+                        // One bar per day of the last HISTORY_DAYS; numbers only, so `raw` is safe on public pages
+                        tr(classes = "history") {
+                            td { attributes["colspan"] = "4"; unsafe { raw(renderHistorySvg(status.history)) } }
                         }
                     }
                 }

@@ -4,6 +4,7 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import java.nio.file.Files
 import java.time.Instant
+import java.time.LocalDate
 
 class CheckHistoryTest : FunSpec({
 
@@ -32,6 +33,26 @@ class CheckHistoryTest : FunSpec({
 
         latest.map { it.success } shouldBe listOf(true, false, false)
         latest.map { it.responseTimeMs } shouldBe listOf(3.0, 2.0, 1.0)
+        appDatabase.close()
+    }
+
+    test("dailySummaries groups by UTC day: counts, failures and the average latency of successful checks only") {
+        val appDatabase = freshDatabase()
+        val day1 = Instant.parse("2026-03-01T00:00:00Z")
+        val day2 = Instant.parse("2026-03-02T23:59:59Z")
+        recordCheck(appDatabase.database, CheckHistoryEntry("m1", day1, true, 100.0, null), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("m1", day1.plusSeconds(60), true, 300.0, null), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("m1", day1.plusSeconds(120), false, 9999.0, "timeout"), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("m1", day2, false, 5000.0, "refused"), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("other", day1, true, 1.0, null), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("m1", day1.minusSeconds(1), true, 1.0, null), null) // before `from`
+
+        val summaries = dailySummaries(appDatabase.database, "m1", from = day1)
+
+        summaries shouldBe listOf(
+            DaySummary(LocalDate.parse("2026-03-01"), checks = 3, failed = 1, averageOkMillis = 200.0),
+            DaySummary(LocalDate.parse("2026-03-02"), checks = 1, failed = 1, averageOkMillis = null)
+        )
         appDatabase.close()
     }
 

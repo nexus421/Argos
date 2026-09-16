@@ -6,6 +6,7 @@ import bayern.kickner.argos.config.ConfigError
 import bayern.kickner.argos.config.MonitorConfig
 import bayern.kickner.argos.config.StatusPageConfig
 import bayern.kickner.argos.config.TcpCheckConfig
+import bayern.kickner.argos.db.DaySummary
 import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContain
@@ -21,6 +22,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
 import java.net.URI
 import java.time.Instant
+import java.time.LocalDate
 
 private val config = AppConfig(
     monitors = listOf(
@@ -33,9 +35,13 @@ private val config = AppConfig(
     )
 )
 
+private val today = LocalDate.parse("2026-01-01")
+private val cleanHistory = List(HISTORY_DAYS) { DaySummary(today.minusDays(HISTORY_DAYS - 1L - it), 10, 0, 20.0) }
+private val troubledHistory = cleanHistory.dropLast(1) + DaySummary(today, 10, 4, 900.0)
+
 private val allStatuses = listOf(
-    MonitorStatus("m1", "Public API", MonitorState.UP, Instant.parse("2026-01-01T12:00:00Z"), 0.036, null),
-    MonitorStatus("m2", "Database", MonitorState.DOWN, Instant.parse("2026-01-01T12:00:30Z"), 5000.0, "Connection refused <script>")
+    MonitorStatus("m1", "Public API", MonitorState.UP, Instant.parse("2026-01-01T12:00:00Z"), 0.036, null, cleanHistory),
+    MonitorStatus("m2", "Database", MonitorState.DOWN, Instant.parse("2026-01-01T12:00:30Z"), 5000.0, "Connection refused <script>", troubledHistory)
 )
 
 private val statusSource = StatusSource { page -> allStatuses.filter { it.id in page.monitorIds } }
@@ -54,7 +60,20 @@ class WebModuleTest : FunSpec({
             html shouldContain "DOWN"
             html shouldContain "0.04 ms"
             html shouldContain "5000 ms"
-            html shouldContain "2026-01-01T12:00:30Z"
+            html shouldContain "01.01.2026 12:00:30 UTC"
+            html shouldNotContain "2026-01-01T12:00:30Z"
+        }
+    }
+
+    test("status page draws a 30-day history chart per monitor, on public pages too") {
+        testApplication {
+            application { configureWeb(config, statusSource) }
+
+            val html = client.get("/status/public").bodyAsText()
+
+            Regex("<svg class=\"history\"").findAll(html).count() shouldBe 2
+            Regex("class=\"bar-failed\"").findAll(html).count() shouldBe 1
+            html shouldContain "01.01.2026: 60.0 % up, 4/10 failed, avg 900 ms"
         }
     }
 

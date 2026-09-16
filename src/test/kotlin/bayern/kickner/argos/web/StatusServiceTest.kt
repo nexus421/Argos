@@ -5,13 +5,18 @@ import bayern.kickner.argos.config.MonitorConfig
 import bayern.kickner.argos.config.StatusPageConfig
 import bayern.kickner.argos.config.TcpCheckConfig
 import bayern.kickner.argos.db.CheckHistoryEntry
+import bayern.kickner.argos.db.DaySummary
 import bayern.kickner.argos.db.connectDatabase
 import bayern.kickner.argos.db.recordCheck
 import bayern.kickner.argos.notify.MonitorRuntimeState
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import java.nio.file.Files
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 class StatusServiceTest : FunSpec({
 
@@ -39,11 +44,31 @@ class StatusServiceTest : FunSpec({
 
         val statuses = service.statusesFor(page)
 
-        statuses shouldBe listOf(
-            MonitorStatus("up", "Up Service", MonitorState.UP, at, 12.0, null),
-            MonitorStatus("down", "Down Service", MonitorState.DOWN, at, 5000.0, "Connection refused"),
-            MonitorStatus("fresh", "Fresh Service", MonitorState.UNKNOWN, null, null, null)
+        statuses.map { it.copy(history = emptyList()) } shouldBe listOf(
+            MonitorStatus("up", "Up Service", MonitorState.UP, at, 12.0, null, emptyList()),
+            MonitorStatus("down", "Down Service", MonitorState.DOWN, at, 5000.0, "Connection refused", emptyList()),
+            MonitorStatus("fresh", "Fresh Service", MonitorState.UNKNOWN, null, null, null, emptyList())
         )
+        appDatabase.close()
+    }
+
+    test("history covers the last HISTORY_DAYS UTC days ending today, empty days where nothing was stored") {
+        val appDatabase = connectDatabase(Files.createTempDirectory("argos-status").toFile().absolutePath)
+        val today = LocalDate.now(ZoneOffset.UTC)
+        val noon = today.atTime(12, 0).toInstant(ZoneOffset.UTC)
+        recordCheck(appDatabase.database, CheckHistoryEntry("up", noon, true, 10.0, null), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("up", noon.minus(3, ChronoUnit.DAYS), false, 1.0, "x"), null)
+        recordCheck(appDatabase.database, CheckHistoryEntry("up", noon.minus(HISTORY_DAYS.toLong(), ChronoUnit.DAYS), true, 1.0, null), null) // just outside
+        val service = StatusService(config, appDatabase.database) { MonitorRuntimeState() }
+
+        val history = service.statusesFor(page).first { it.id == "up" }.history
+
+        history shouldHaveSize HISTORY_DAYS
+        history.first() shouldBe DaySummary(today.minusDays(HISTORY_DAYS - 1L), checks = 0, failed = 0, averageOkMillis = null)
+        history.last() shouldBe DaySummary(today, checks = 1, failed = 0, averageOkMillis = 10.0)
+        history[HISTORY_DAYS - 4] shouldBe DaySummary(today.minusDays(3), checks = 1, failed = 1, averageOkMillis = null)
+        history.count { it.checks > 0 } shouldBe 2
+        history.map { it.day } shouldBe (0 until HISTORY_DAYS).map { today.minusDays(HISTORY_DAYS - 1L - it) }
         appDatabase.close()
     }
 })

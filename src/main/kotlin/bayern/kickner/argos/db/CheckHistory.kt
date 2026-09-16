@@ -1,17 +1,26 @@
 package bayern.kickner.argos.db
 
+import org.jetbrains.exposed.v1.core.Case
+import org.jetbrains.exposed.v1.core.CustomFunction
 import org.jetbrains.exposed.v1.core.SortOrder
+import org.jetbrains.exposed.v1.core.TextColumnType
 import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.count
+import org.jetbrains.exposed.v1.core.doubleLiteral
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.greater
+import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.inSubQuery
+import org.jetbrains.exposed.v1.core.intLiteral
 import org.jetbrains.exposed.v1.core.less
+import org.jetbrains.exposed.v1.core.sum
 import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.andWhere
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import java.time.Instant
+import java.time.LocalDate
 
 /**
  * One stored check outcome.
@@ -45,6 +54,43 @@ suspend fun latestResults(database: Database, monitorId: String, limit: Int): Li
                 success = it[CheckHistoryTable.success],
                 responseTimeMs = it[CheckHistoryTable.responseTimeMs],
                 errorMessage = it[CheckHistoryTable.errorMessage]
+            )
+        }
+}
+
+/**
+ * One UTC day of a monitor's history, aggregated in SQL.
+ *
+ * @property checks Number of stored results that day.
+ * @property failed Number of failed results that day.
+ * @property averageOkMillis Mean latency of the successful results, null when none succeeded.
+ */
+data class DaySummary(val day: LocalDate, val checks: Int, val failed: Int, val averageOkMillis: Double?)
+
+/**
+ * Per-day totals of one monitor from [from] on, oldest day first. Grouping happens in SQLite on the stored text
+ * (`date(timestamp)`), so a month of minute checks costs one indexed query instead of 43 000 rows. The JVM runs
+ * in UTC (Main.kt), which makes those days UTC days.
+ */
+suspend fun dailySummaries(database: Database, monitorId: String, from: Instant): List<DaySummary> = dbRead(database) {
+    val day = CustomFunction("date", TextColumnType(), CheckHistoryTable.timestamp)
+    val checks = CheckHistoryTable.id.count()
+    val failed = Case().When(CheckHistoryTable.success eq false, intLiteral(1)).Else(intLiteral(0)).sum()
+    val okMillis = Case().When(CheckHistoryTable.success eq true, CheckHistoryTable.responseTimeMs).Else(doubleLiteral(0.0)).sum()
+
+    CheckHistoryTable.select(day, checks, failed, okMillis)
+        .where { (CheckHistoryTable.monitorId eq monitorId) and (CheckHistoryTable.timestamp greaterEq from) }
+        .groupBy(day)
+        .orderBy(day, SortOrder.ASC)
+        .map { row ->
+            val total = row[checks].toInt()
+            val failures = row[failed] ?: 0
+            val succeeded = total - failures
+            DaySummary(
+                day = LocalDate.parse(row[day]),
+                checks = total,
+                failed = failures,
+                averageOkMillis = if (succeeded > 0) (row[okMillis] ?: 0.0) / succeeded else null
             )
         }
 }

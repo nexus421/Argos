@@ -62,7 +62,8 @@ application {
 
 tasks.test {
     useJUnitPlatform()
-    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    // Same zone as production (Main.kt): Exposed writes SQLite timestamps in the JVM default zone
+    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Duser.timezone=UTC")
 }
 
 ktor {

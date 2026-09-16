@@ -2,11 +2,18 @@ package bayern.kickner.argos.web
 
 import bayern.kickner.argos.config.AppConfig
 import bayern.kickner.argos.config.StatusPageConfig
+import bayern.kickner.argos.db.DaySummary
+import bayern.kickner.argos.db.dailySummaries
 import bayern.kickner.argos.db.latestResults
 import bayern.kickner.argos.notify.MonitorRuntimeState
 import org.jetbrains.exposed.v1.jdbc.Database
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.Locale
+
+/** Days of history shown per monitor on a status page, today included. */
+const val HISTORY_DAYS = 30
 
 /**
  * Trigger-level state shown on a status page. DOWN follows the flapping threshold, so a single failed
@@ -23,6 +30,7 @@ enum class MonitorState { UP, DOWN, UNKNOWN }
  * @property lastCheck Time of the newest stored result, null if none yet.
  * @property responseTimeMs Latency of the newest result in milliseconds.
  * @property message Failure detail of the newest result.
+ * @property history One entry per UTC day for the last [HISTORY_DAYS] days, oldest first; `checks == 0` marks a day without results.
  */
 data class MonitorStatus(
     val id: String,
@@ -30,7 +38,8 @@ data class MonitorStatus(
     val state: MonitorState,
     val lastCheck: Instant?,
     val responseTimeMs: Double?,
-    val message: String?
+    val message: String?,
+    val history: List<DaySummary>
 )
 
 /**
@@ -55,6 +64,8 @@ class StatusService(
 
     override suspend fun statusesFor(page: StatusPageConfig): List<MonitorStatus> {
         val monitorsById = config.monitors.associateBy { it.id }
+        val today = LocalDate.now(ZoneOffset.UTC)
+        val firstDay = today.minusDays(HISTORY_DAYS - 1L)
         return page.monitorIds.mapNotNull { monitorsById[it] }.map { monitor ->
             val latest = latestResults(database, monitor.id, limit = 1).firstOrNull()
             val state = when {
@@ -62,7 +73,9 @@ class StatusService(
                 stateOf(monitor.id)?.currentlyDown == true -> MonitorState.DOWN
                 else -> MonitorState.UP
             }
-            MonitorStatus(monitor.id, monitor.name, state, latest?.timestamp, latest?.responseTimeMs, latest?.errorMessage)
+            val byDay = dailySummaries(database, monitor.id, from = firstDay.atStartOfDay(ZoneOffset.UTC).toInstant()).associateBy { it.day }
+            val history = (0 until HISTORY_DAYS).map { firstDay.plusDays(it.toLong()) }.map { byDay[it] ?: DaySummary(it, 0, 0, null) }
+            MonitorStatus(monitor.id, monitor.name, state, latest?.timestamp, latest?.responseTimeMs, latest?.errorMessage, history)
         }
     }
 }
