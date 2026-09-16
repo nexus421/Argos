@@ -112,13 +112,13 @@ fun main(args: Array<String>) {
             notificationScope.launch {
                 notificationDispatcher.sendSystemNotification(
                     subject = "Argos: unexpected offline period",
-                    body = "Last active: $lastHeartbeat, now started: $startedAt"
+                    body = "Last active: ${lastHeartbeat?.let { formatUtc(it) }}, now started: ${formatUtc(startedAt)}"
                 )
             }
         }
         writeHeartbeat(database, startedAt)
     }
-    notificationScope.launch { notificationDispatcher.sendSystemNotification(subject = "Argos started", body = "Started at $startedAt") }
+    notificationScope.launch { notificationDispatcher.sendSystemNotification(subject = "Argos started", body = "Started at ${formatUtc(startedAt)}") }
 
     warnIfIcmpUnavailable(config)
     val scheduler = Scheduler(config, database, appScope, notificationScope, notificationDispatcher).also { runBlocking { it.restoreState() } }

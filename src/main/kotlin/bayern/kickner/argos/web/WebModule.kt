@@ -3,6 +3,7 @@ package bayern.kickner.argos.web
 import bayern.kickner.argos.config.AppConfig
 import bayern.kickner.argos.config.ConfigError
 import bayern.kickner.argos.config.StatusPageConfig
+import bayern.kickner.argos.formatUtc
 import io.ktor.http.HttpHeaders
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCallPipeline
@@ -37,17 +38,12 @@ import kotlinx.html.title
 import kotlinx.html.tr
 import kotlinx.html.unsafe
 import kotnexlib.crypto.Argon2Helper
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 /**
  * Argon2 verification costs ~64 MiB heap and ~100 ms each. One at a time keeps the worst case at 64 MiB of the
  * 256 MiB heap and the work off the scheduler's Default dispatcher; rate-limit the status pages in the reverse proxy.
  */
 private val argonDispatcher = Dispatchers.IO.limitedParallelism(1)
-
-/** Stored instants are UTC (Main.kt pins the JVM zone); shown as such so the page never depends on the viewer's zone. */
-private val lastCheckFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss 'UTC'").withZone(ZoneOffset.UTC)
 
 private const val STATUS_PAGE_CSS = """
 :root { color-scheme: light dark; --bg: #fff; --fg: #222; --line: #ddd; --muted: #6b7280; --up: #1a7f37; --down: #b91c1c; }
@@ -185,7 +181,7 @@ private suspend fun RoutingCall.respondStatusPage(page: StatusPageConfig, status
                             }
                             td(classes = status.state.name) { +status.state.name }
                             td { +(status.responseTimeMs?.let { formatLatency(it) } ?: "–") }
-                            td { +(status.lastCheck?.let { lastCheckFormat.format(it) } ?: "never") }
+                            td { +(status.lastCheck?.let { formatUtc(it) } ?: "never") }
                         }
                         // One bar per day of the last HISTORY_DAYS; numbers only, so `raw` is safe on public pages
                         tr(classes = "history") {

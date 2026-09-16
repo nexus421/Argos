@@ -13,6 +13,7 @@ import bayern.kickner.argos.db.latestResults
 import bayern.kickner.argos.db.pendingAlertById
 import bayern.kickner.argos.db.pendingAlerts
 import bayern.kickner.argos.db.recordCheck
+import bayern.kickner.argos.formatUtc
 import bayern.kickner.argos.notify.MonitorEvent
 import bayern.kickner.argos.notify.MonitorRuntimeState
 import bayern.kickner.argos.notify.NotificationDispatcher
@@ -176,7 +177,7 @@ class Scheduler(
 
         val text = when (transition(monitor.id, result.success)) {
             TriggerDecision.SendDownNotification ->
-                AlertText(MonitorEvent.DOWN, "${monitor.name} is DOWN", "Detected at $finishedAt. ${result.message ?: "No detail provided"}")
+                AlertText(MonitorEvent.DOWN, "${monitor.name} is DOWN", "Detected at ${formatUtc(finishedAt)}. ${result.message ?: "No detail provided"}")
             TriggerDecision.SendRecoveryNotification ->
                 AlertText(MonitorEvent.UP, "${monitor.name} is UP again", recoveryBody(downSince, finishedAt))
             TriggerDecision.None -> null
@@ -289,13 +290,13 @@ class Scheduler(
 
     private fun recoveryBody(downSince: Instant?, now: Instant): String {
         downSince ?: return "Recovered"
-        return "Recovered. Down since $downSince (${formatDuration(Duration.between(downSince, now))})."
+        return "Recovered. Down since ${formatUtc(downSince)} (${formatDuration(Duration.between(downSince, now))})."
     }
 
     private suspend fun notifyPause(lastTick: Long, now: Long) {
         notificationDispatcher.sendSystemNotification(
             subject = "Argos: scheduler paused",
-            body = "No checks ran between ${Instant.ofEpochSecond(lastTick)} and ${Instant.ofEpochSecond(now)} " +
+            body = "No checks ran between ${formatUtc(Instant.ofEpochSecond(lastTick))} and ${formatUtc(Instant.ofEpochSecond(now))} " +
                 "(${now - lastTick} s) — the process was suspended or the clock jumped forward. Checks resumed normally."
         )
     }

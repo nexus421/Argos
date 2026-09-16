@@ -15,7 +15,7 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldStartWith
+import io.kotest.matchers.string.shouldMatch
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
@@ -81,7 +81,7 @@ class SchedulerTest : FunSpec({
             latestResults(harness.db.database, "m1", 10).size shouldBeGreaterThan 1   // next ticks ran: inFlight was released
         }
         // A redelivered DOWN would otherwise look like a fresh one; webhooks carry no timestamp of their own
-        harness.deliveries.single().substringAfter('|') shouldStartWith "Detected at 20"
+        harness.deliveries.single().substringAfter('|') shouldMatch Regex("Detected at \\d{2}\\.\\d{2}\\.\\d{4} \\d{2}:\\d{2}:\\d{2} UTC\\. .*")
         harness.close()
     }
 
@@ -137,7 +137,7 @@ class SchedulerTest : FunSpec({
         }
 
         val recovery = harness.deliveries.last().substringAfter('|')
-        recovery shouldContain "Down since"
+        recovery shouldMatch Regex("Recovered\\. Down since \\d{2}\\.\\d{2}\\.\\d{4} \\d{2}:\\d{2}:\\d{2} UTC \\(\\d+ s\\)\\.")
         recovery shouldContain " s)"
         harness.close()
     }
