@@ -5,10 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Argos Configuration Editor</title>
 <link rel="stylesheet" href="/setup/editor.css">
+  <link rel="icon" type="image/svg+xml" href="/setup/favicon.svg">
 </head>
 <body>
 <header>
-  <h1>Argos Configuration Editor</h1>
+  <div class="brand">
+    <img src="/setup/favicon.svg" alt="Argos Logo" width="32" height="32" class="nav-icon">
+    <h1>Argos Configuration Editor</h1>
+  </div>
   <p class="lead">Build or edit a <code>config.json</code> without reading the docs. Everything happens in your browser: nothing is read from or written to the Argos server. Download the result, place it next to Argos and restart the service.</p>
   <p class="toolbar">
     <label class="button">Load config.json <input type="file" id="upload" accept="application/json,.json" hidden></label>

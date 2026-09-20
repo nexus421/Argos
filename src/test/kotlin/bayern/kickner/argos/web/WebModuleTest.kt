@@ -1,11 +1,6 @@
 package bayern.kickner.argos.web
 
-import bayern.kickner.argos.config.AppConfig
-import bayern.kickner.argos.config.BasicAuthConfig
-import bayern.kickner.argos.config.ConfigError
-import bayern.kickner.argos.config.MonitorConfig
-import bayern.kickner.argos.config.StatusPageConfig
-import bayern.kickner.argos.config.TcpCheckConfig
+import bayern.kickner.argos.config.*
 import bayern.kickner.argos.db.DaySummary
 import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
@@ -14,12 +9,10 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
-import io.ktor.client.request.basicAuth
-import io.ktor.client.request.get
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.HttpHeaders
-import io.ktor.http.HttpStatusCode
-import io.ktor.server.testing.testApplication
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
+import io.ktor.server.testing.*
 import java.net.URI
 import java.time.Instant
 import java.time.LocalDate
@@ -179,11 +172,34 @@ class WebModuleTest : FunSpec({
                 references shouldContain "/setup/config-model.js"
                 references shouldContain "/setup/editor.js"
                 references shouldContain "/setup/editor.css"
+                references shouldContain "/setup/favicon.svg"
                 references.forEach { reference ->
                     val resolved = URI("http://localhost/setup").resolve(reference).path
                     withClue("$reference resolved from /setup as $resolved") { client.get(resolved).status shouldBe HttpStatusCode.OK }
                 }
             }
+        }
+    }
+
+    test("favicon.ico and favicon.svg are served at root with image/svg+xml content type") {
+        testApplication {
+            application { configureWeb(config, statusSource) }
+            val ico = client.get("/favicon.ico")
+            ico.status shouldBe HttpStatusCode.OK
+            ico.headers["Content-Type"] shouldBe "image/svg+xml"
+
+            val svg = client.get("/favicon.svg")
+            svg.status shouldBe HttpStatusCode.OK
+            svg.headers["Content-Type"] shouldBe "image/svg+xml"
+        }
+    }
+
+    test("status page includes favicon and nav-icon brand header") {
+        testApplication {
+            application { configureWeb(config, statusSource) }
+            val html = client.get("/status/public").bodyAsText()
+            html shouldContain "/setup/favicon.svg"
+            html shouldContain "class=\"nav-icon\""
         }
     }
 

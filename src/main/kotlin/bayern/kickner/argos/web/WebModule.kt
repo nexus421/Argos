@@ -4,39 +4,16 @@ import bayern.kickner.argos.config.AppConfig
 import bayern.kickner.argos.config.ConfigError
 import bayern.kickner.argos.config.StatusPageConfig
 import bayern.kickner.argos.formatUtc
-import io.ktor.http.HttpHeaders
-import io.ktor.server.application.Application
-import io.ktor.server.application.ApplicationCallPipeline
-import io.ktor.server.application.call
-import io.ktor.server.application.install
-import io.ktor.server.auth.Authentication
-import io.ktor.server.auth.UserIdPrincipal
-import io.ktor.server.auth.authenticate
-import io.ktor.server.auth.basic
-import io.ktor.http.HttpStatusCode
-import io.ktor.server.html.respondHtml
-import io.ktor.server.http.content.staticResources
-import io.ktor.server.response.header
-import io.ktor.server.response.respondText
-import io.ktor.server.routing.RoutingCall
-import io.ktor.server.routing.get
-import io.ktor.server.routing.routing
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.auth.*
+import io.ktor.server.html.*
+import io.ktor.server.http.content.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.html.body
-import kotlinx.html.h1
-import kotlinx.html.head
-import kotlinx.html.meta
-import kotlinx.html.p
-import kotlinx.html.style
-import kotlinx.html.table
-import kotlinx.html.tbody
-import kotlinx.html.td
-import kotlinx.html.th
-import kotlinx.html.thead
-import kotlinx.html.title
-import kotlinx.html.tr
-import kotlinx.html.unsafe
+import kotlinx.html.*
 import kotnexlib.crypto.Argon2Helper
 
 /**
@@ -60,6 +37,9 @@ svg.history { display: block; width: 100%; height: 40px; }
 .bar-ok { fill: var(--up); }
 .bar-failed { fill: var(--down); }
 .bar-nodata { fill: var(--line); }
+.brand { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+.brand h1 { margin: 0; }
+.nav-icon { border-radius: 6px; flex-shrink: 0; }
 """
 
 /**
@@ -81,6 +61,23 @@ fun Application.configureWeb(config: AppConfig?, statusSource: StatusSource, con
 
     routing {
         staticResources("/setup", "static")
+
+        get("/favicon.ico") {
+            val favicon = javaClass.getResourceAsStream("/static/favicon.svg")?.readBytes()
+            if (favicon != null) {
+                call.respondBytes(favicon, ContentType.Image.SVG)
+            } else {
+                call.respond(HttpStatusCode.NotFound)
+            }
+        }
+        get("/favicon.svg") {
+            val favicon = javaClass.getResourceAsStream("/static/favicon.svg")?.readBytes()
+            if (favicon != null) {
+                call.respondBytes(favicon, ContentType.Image.SVG)
+            } else {
+                call.respond(HttpStatusCode.NotFound)
+            }
+        }
 
         if (config == null) {
             // 503 on purpose: the process is up but monitoring is not, and only a non-2xx makes that visible to systemd-external checks
@@ -159,10 +156,17 @@ private suspend fun RoutingCall.respondStatusPage(page: StatusPageConfig, status
             meta(name = "viewport", content = "width=device-width, initial-scale=1")
             meta { httpEquiv = "refresh"; content = "30" }
             title { +page.name }
+            link(rel = "icon", href = "/setup/favicon.svg", type = "image/svg+xml")
             style { unsafe { raw(STATUS_PAGE_CSS) } }
         }
         body {
-            h1 { +page.name }
+            div(classes = "brand") {
+                img(src = "/setup/favicon.svg", alt = "Argos", classes = "nav-icon") {
+                    attributes["width"] = "32"
+                    attributes["height"] = "32"
+                }
+                h1 { +page.name }
+            }
             table {
                 thead {
                     tr {
