@@ -14,26 +14,18 @@ import bayern.kickner.argos.selfmonitor.hasUnplannedGap
 import bayern.kickner.argos.selfmonitor.readLastHeartbeat
 import bayern.kickner.argos.selfmonitor.writeHeartbeat
 import bayern.kickner.argos.web.StatusService
-import bayern.kickner.argos.web.StatusSource
 import bayern.kickner.argos.web.configureWeb
 import bayern.kickner.argos.web.hashPassword
 import bayern.kickner.klogger.KLogger
 import bayern.kickner.klogger.staticLog
-import io.ktor.server.cio.CIO as ServerCIO
-import io.ktor.server.engine.embeddedServer
-import kotlinx.coroutines.CoroutineExceptionHandler
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.job
-import kotlinx.coroutines.joinAll
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
+import io.ktor.server.engine.*
+import kotlinx.coroutines.*
 import kotnexlib.ArgsInterpreter
 import kotnexlib.ResultOf2
 import java.time.Instant
-import java.util.TimeZone
+import java.util.*
+import kotlin.time.Duration.Companion.milliseconds
+import io.ktor.server.cio.CIO as ServerCIO
 
 private const val TAG = "Main"
 
@@ -126,6 +118,7 @@ fun main(args: Array<String>) {
 
     val server = embeddedServer(ServerCIO, host = config.webHost, port = config.webPort) {
         configureWeb(config, StatusService(config, database, scheduler::stateOf))
+
     }
 
     Runtime.getRuntime().addShutdownHook(Thread {
@@ -133,7 +126,7 @@ fun main(args: Array<String>) {
         appScope.cancel()
         runCatching {
             runBlocking {
-                val drained = withTimeoutOrNull(NOTIFICATION_DRAIN_MILLIS) {
+                val drained = withTimeoutOrNull(NOTIFICATION_DRAIN_MILLIS.milliseconds) {
                     notificationScope.coroutineContext.job.children.toList().joinAll()
                 }
                 if (drained == null) staticLog(KLogger.Level.WARN, TAG) { "Shutdown: alert deliveries still running after ${NOTIFICATION_DRAIN_MILLIS / 1000} s; queued alerts are re-delivered at the next start." }
@@ -153,7 +146,7 @@ fun main(args: Array<String>) {
  */
 private fun serveBootstrap(host: String, port: Int, error: ConfigError) {
     embeddedServer(ServerCIO, host = host, port = port) {
-        configureWeb(null, StatusSource { emptyList() }, error)
+        configureWeb(null, { emptyList() }, error)
     }.start(wait = true)
 }
 
