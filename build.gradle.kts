@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "bayern.kickner"
-version = "0.0.2-test"
+version = "0.1.0"
 
 repositories {
     mavenCentral()
