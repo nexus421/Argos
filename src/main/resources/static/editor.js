@@ -133,13 +133,12 @@
       const selected = selectedIds();
       const ids = [...new Set([...available, ...selected])];
       const note = ids.length === 0 ? texts.none : selected.length === 0 ? texts.nothingTicked : null;
-      container.replaceChildren(
-        ...ids.map((id) => el('label', {},
-          el('input', { type: 'checkbox', checked: selected.includes(id), onchange: (event) => { onToggle(id, event.target.checked); refresh(); } }),
-          available.includes(id) ? id : `${id} (unknown)`
-        )),
-        note ? el('span', { class: 'muted' }, note) : null
-      );
+      const children = ids.map((id) => el('label', {},
+        el('input', { type: 'checkbox', checked: selected.includes(id), onchange: (event) => { onToggle(id, event.target.checked); refresh(); } }),
+        available.includes(id) ? id : `${id} (unknown)`
+      ));
+      if (note) children.push(el('span', { class: 'muted' }, note));
+      container.replaceChildren(...children);
     }
     referencePickers.push(render);
     render();
@@ -375,24 +374,131 @@
     status.className = isError ? 'error' : 'muted';
   }
 
+  function applyConfig(text, sourceLabel) {
+    let loaded;
+    try {
+      loaded = model.normalize(JSON.parse(text));
+    } catch (error) {
+      const reason = error instanceof SyntaxError ? `is not valid JSON: ${error.message}` : `does not look like an Argos config: ${error.message}`;
+      setFileStatus(`${sourceLabel} ${reason}`, true);
+      return { ok: false, reason: `${sourceLabel} ${reason}` };
+    }
+    config = loaded;
+    notifyModes = new WeakMap();
+    setFileStatus(`Loaded ${sourceLabel} – the file stays on this device.`);
+    renderAll();
+    return { ok: true };
+  }
+
   $('#upload').addEventListener('change', (event) => {
     const file = event.target.files[0];
     event.target.value = '';
     if (file === undefined) return;
     file.text().then((text) => {
-      let loaded;
+      applyConfig(text, file.name);
+    }, (error) => setFileStatus(`${file.name} could not be read: ${error.message}`, true));
+  });
+
+  function openPasteDialog(initialText = '', initialError = '') {
+    const dialog = $('#pasteDialog');
+    if (!dialog) return;
+    const textarea = $('#pasteInput');
+    const errorEl = $('#pasteError');
+    textarea.value = initialText;
+    if (initialError) {
+      errorEl.textContent = initialError;
+      errorEl.hidden = false;
+    } else {
+      errorEl.textContent = '';
+      errorEl.hidden = true;
+    }
+    dialog.showModal();
+    textarea.focus();
+    if (initialText) textarea.select();
+  }
+
+  $('#paste')?.addEventListener('click', async () => {
+    if (navigator.clipboard && navigator.clipboard.readText) {
       try {
-        loaded = model.normalize(JSON.parse(text));
-      } catch (error) {
-        const reason = error instanceof SyntaxError ? `is not valid JSON: ${error.message}` : `does not look like an Argos config: ${error.message}`;
-        setFileStatus(`${file.name} ${reason}`, true);
+        const text = await navigator.clipboard.readText();
+        if (text && text.trim() !== '') {
+          const result = applyConfig(text, 'from clipboard');
+          if (result.ok) return;
+          openPasteDialog(text, result.reason);
+          return;
+        }
+      } catch {
+        // Clipboard read permission denied or not supported in this context -> fallback to dialog
+      }
+    }
+    openPasteDialog();
+  });
+
+  const pasteDialog = $('#pasteDialog');
+  if (pasteDialog) {
+    $('#pasteSubmit').addEventListener('click', () => {
+      const text = $('#pasteInput').value.trim();
+      if (text === '') {
+        const err = $('#pasteError');
+        err.textContent = 'Please enter or paste JSON text.';
+        err.hidden = false;
         return;
       }
-      config = loaded;
-      notifyModes = new WeakMap();
-      setFileStatus(`Loaded ${file.name} – the file stays on this device.`);
-      renderAll();
-    }, (error) => setFileStatus(`${file.name} could not be read: ${error.message}`, true));
+      const result = applyConfig(text, 'from clipboard');
+      if (result.ok) {
+        pasteDialog.close();
+      } else {
+        const err = $('#pasteError');
+        err.textContent = result.reason;
+        err.hidden = false;
+      }
+    });
+
+    $('#pasteCancel').addEventListener('click', () => {
+      pasteDialog.close();
+    });
+
+    pasteDialog.addEventListener('click', (event) => {
+      if (event.target === pasteDialog) pasteDialog.close();
+    });
+
+    $('#pasteInput').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        $('#pasteSubmit').click();
+      }
+    });
+
+    const pasteFromClipboardBtn = $('#pasteFromClipboard');
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      pasteFromClipboardBtn.addEventListener('click', async () => {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            $('#pasteInput').value = text;
+            $('#pasteError').hidden = true;
+          }
+        } catch {
+          const err = $('#pasteError');
+          err.textContent = 'Clipboard access was denied by browser. Please paste using Ctrl+V.';
+          err.hidden = false;
+        }
+      });
+    } else {
+      pasteFromClipboardBtn.hidden = true;
+    }
+  }
+
+  window.addEventListener('paste', (event) => {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+    if ($('#pasteDialog')?.open) return;
+    const text = event.clipboardData?.getData('text');
+    if (!text || text.trim() === '') return;
+    event.preventDefault();
+    const result = applyConfig(text, 'from clipboard');
+    if (!result.ok) {
+      openPasteDialog(text, result.reason);
+    }
   });
 
   $('#reset').addEventListener('click', () => {

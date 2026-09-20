@@ -12,6 +12,7 @@
   <p class="lead">Build or edit a <code>config.json</code> without reading the docs. Everything happens in your browser: nothing is read from or written to the Argos server. Download the result, place it next to Argos and restart the service.</p>
   <p class="toolbar">
     <label class="button">Load config.json <input type="file" id="upload" accept="application/json,.json" hidden></label>
+    <button type="button" id="paste">Paste JSON</button>
     <button type="button" id="reset">Start from scratch</button>
     <span id="fileStatus" class="muted"></span>
   </p>
@@ -63,6 +64,18 @@
     <p class="muted">The file contains SMTP passwords and tokens in plain text: keep it out of version control and restrict it with <code>chmod 600</code>. Argos reads it from <code>./config.json</code> or the path given as <code>configPath=…</code>; changes take effect after a restart.</p>
   </section>
 </main>
+
+<dialog id="pasteDialog">
+  <h3>Paste configuration JSON</h3>
+  <p class="muted">Paste your <code>config.json</code> content below. The configuration stays in your browser.</p>
+  <textarea id="pasteInput" placeholder='{ "monitors": [ ... ] }' spellcheck="false"></textarea>
+  <p id="pasteError" class="error" hidden></p>
+  <div class="toolbar dialog-actions">
+    <button type="button" id="pasteFromClipboard" class="small">Paste from clipboard</button>
+    <button type="button" id="pasteCancel">Cancel</button>
+    <button type="button" id="pasteSubmit">Load</button>
+  </div>
+</dialog>
 
 <script src="/setup/config-model.js"></script>
 <script src="/setup/editor.js"></script>
