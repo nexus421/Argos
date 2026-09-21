@@ -89,12 +89,12 @@ data class WebhookConfig(
  * HTTP Basic Authentication credentials for protecting a status page.
  *
  * @property username Allowed username.
- * @property passwordHash Argon2 hash of the allowed password.
+ * @property password Allowed password, in plain text like the SMTP passwords — `config.json` is the secret store.
  */
 @Serializable
 data class BasicAuthConfig(
     val username: String,
-    val passwordHash: String
+    val password: String
 )
 
 /**

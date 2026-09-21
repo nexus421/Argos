@@ -24,7 +24,7 @@ private val config = AppConfig(
     ),
     statusPages = listOf(
         StatusPageConfig("public", "Public Status", listOf("m1", "m2")),
-        StatusPageConfig("private", "Private Status", listOf("m1"), BasicAuthConfig("admin", hashPassword("secret")))
+        StatusPageConfig("private", "Private Status", listOf("m1"), BasicAuthConfig("admin", "secret"))
     )
 )
 
@@ -71,7 +71,16 @@ class WebModuleTest : FunSpec({
     }
 
     test("protected status page HTML-escapes error messages") {
-        val protectedConfig = config.copy(statusPages = listOf(StatusPageConfig("both", "Both", listOf("m1", "m2"), BasicAuthConfig("admin", hashPassword("secret")))))
+        val protectedConfig = config.copy(
+            statusPages = listOf(
+                StatusPageConfig(
+                    "both",
+                    "Both",
+                    listOf("m1", "m2"),
+                    BasicAuthConfig("admin", "secret")
+                )
+            )
+        )
         testApplication {
             application { configureWeb(protectedConfig, statusSource) }
 
@@ -83,7 +92,14 @@ class WebModuleTest : FunSpec({
     }
 
     test("public status page shows state but hides error details, protected page shows them") {
-        val protectedConfig = config.copy(statusPages = config.statusPages + StatusPageConfig("both", "Both", listOf("m1", "m2"), BasicAuthConfig("admin", hashPassword("secret"))))
+        val protectedConfig = config.copy(
+            statusPages = config.statusPages + StatusPageConfig(
+                "both",
+                "Both",
+                listOf("m1", "m2"),
+                BasicAuthConfig("admin", "secret")
+            )
+        )
         testApplication {
             application { configureWeb(protectedConfig, statusSource) }
 

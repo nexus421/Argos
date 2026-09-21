@@ -176,13 +176,6 @@ Without `config.json` Argos runs in bootstrap mode: `/` answers 503 and the setu
 
 Every change to `config.json` needs `sudo systemctl restart argos` (no hot reload).
 
-Password hash for a protected status page (`statusPages[].basicAuth.passwordHash`) - the
-leading space keeps the password out of your shell history when `HISTCONTROL=ignorespace` is set:
-
-```bash
- java -jar @DIR@/argos.jar hashPassword=mySecret
-```
-
 Argos serves plain HTTP. Put a TLS-terminating reverse proxy in front of it and set
 `webHost` to `127.0.0.1` when the proxy runs on the same host.
 

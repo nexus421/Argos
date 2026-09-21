@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project state
 
 Argos ist ein Kotlin/JVM-Monitoring-Tool (`bayern.kickner`), Fat Jar, ohne Login/Docker. Nutzt
-Klogger (Logging) und KotNexLib (`ResultOf2`, `ArgsInterpreter`, `Argon2Helper`) wie in
+Klogger (Logging) und KotNexLib (`ResultOf2`, `ArgsInterpreter`) wie in
 [nexus421/DemoAiProject](https://github.com/nexus421/DemoAiProject) beschrieben.
 
 Entry point: `Main.kt`. Packages unter `bayern.kickner.argos`:
@@ -28,7 +28,6 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
 ./gradlew build
 ./gradlew run
 ./gradlew run --args="configPath=config.json"
-./gradlew run --args="hashPassword=geheim"   # Argon2-Hash für statusPages[].basicAuth.passwordHash
 ./gradlew test
 ./gradlew test --tests "bayern.kickner.argos.config.ConfigLoaderTest"
 ```
@@ -107,8 +106,11 @@ Gradle-Wrapper verwenden (`./gradlew`), keine System-Gradle-Installation.
   falscher Struktur (`normalize`) statt die Seite zu crashen; `ConfigModelJsTest` führt die Datei per GraalJS (nur Test-Scope) aus
   und prüft sie gegen `loadConfig` und das README-Beispiel. `editor.js` (DOM) wird im Browser geprüft.
   Ressourcen-Pfade in `index.html` absolut (`/setup/…`), weil `/setup` ohne Slash ausgeliefert wird.
-  Argon2-Hashes entstehen nicht im Browser (Feld + Hinweis auf `hashPassword=`); Download ist gesperrt,
-  solange die Validierung Fehler meldet; UI-Sprache Englisch.
+  Download ist gesperrt, solange die Validierung Fehler meldet; UI-Sprache Englisch.
+- Status-Page-Passwörter (`basicAuth.password`) stehen bewusst im Klartext in der Config — wie die SMTP-Passwörter und
+  Webhook-Tokens daneben; `chmod 600` ist der Schutz. Vergleich in `WebModule.kt` per `MessageDigest.isEqual`, beide
+  Felder immer (non-short-circuit `and`). Kein Hashing (Argon2 bis 0.1.0 entfernt: eigener CLI-Modus, 64 MiB pro
+  Login-Versuch, Editor konnte das Feld nicht befüllen).
 - Deployment: `scripts/install.sh` (Debian/systemd, `curl … | sudo bash` oder `sudo ./install.sh`) installiert ins
   aktuelle Verzeichnis, lädt `argos.jar` vom neuesten GitHub-Release (`nexus421/Argos`, Asset muss `argos.jar`
   heißen), erzeugt Unit (Service-User = `$SUDO_USER`, `--user` überschreibt; root technisch nicht nötig) und eine

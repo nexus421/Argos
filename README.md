@@ -21,12 +21,6 @@ cp config.example.json config.json   # or start without config to use the web bu
 java -jar build/libs/argos.jar configPath=/path/to/config.json
 ```
 
-Generate an Argon2id password hash for a protected status page:
-
-```bash
- java -jar build/libs/argos.jar hashPassword=mySecret   # leading space keeps it out of shell history
-```
-
 With the server running, check health:
 
 ```bash
@@ -40,15 +34,14 @@ Tests: `./gradlew test` — GitHub Actions runs them on every push (`.github/wor
 | Argument | Default | Description |
 |---|---|---|
 | `configPath=<path>` | `config.json` | Path to JSON config file (see Configuration). |
-| `hashPassword=<secret>` | — | Generates an Argon2id hash for `statusPages[].basicAuth.passwordHash`, prints to stdout, and exits. |
 
-Without `hashPassword=`, Argos starts the server. Modes and exit codes:
+Modes and exit codes:
 
-| Mode / Code | Meaning |
-|---|---|
-| `0` | Normal operation (monitoring active, `/` returns `200 ok`), or `hashPassword=` completed. |
+| Mode / Code       | Meaning                                                                                                                                                                        |
+|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `0`               | Normal operation (monitoring active, `/` returns `200 ok`).                                                                                                                    |
 | Bootstrap (`503`) | Missing/invalid config or inaccessible `dataDir`. Argos stays alive and serves `/setup` while `/` returns `503 Service Unavailable` with problem category. Details in journal. |
-| `143` | JVM exit code after SIGTERM (`systemctl stop`). Clean stop: checks cancelled, up to 30 s to drain pending alert deliveries, final heartbeat written, WAL checkpointed. |
+| `143`             | JVM exit code after SIGTERM (`systemctl stop`). Clean stop: checks cancelled, up to 30 s to drain pending alert deliveries, final heartbeat written, WAL checkpointed.         |
 
 ## Configuration
 
@@ -133,7 +126,7 @@ One JSON file, `config.json` in the working directory by default (`configPath=<p
       "monitorIds": ["web-api", "db-server", "gateway-ping"],
       "basicAuth": {
         "username": "admin",
-        "passwordHash": "JGFyZ29uMmlkJHY9MTkkbT02NTUzNix0PTMscD0xJEdOZXF5YjBBcDI4TzhraExXK2VZNnc9PSR3OE1kWHlWQzhhYTZTMU4vOG5lOWdPSTRHbWZDSWgyS3VraVdPSzVoWEprPQ=="
+        "password": "change-me"
       }
     }
   ],
@@ -145,8 +138,6 @@ One JSON file, `config.json` in the working directory by default (`configPath=<p
   "webPort": 8080
 }
 ```
-
-The example hash matches password `change-me` — generate yours with `hashPassword=`.
 
 ### Field reference
 
@@ -192,12 +183,12 @@ The example hash matches password `change-me` — generate yours with `hashPassw
 
 #### `statusPages[]`
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `id` | String | required | Path component (`/status/<id>`). `[A-Za-z0-9_.-]`, 1–64 chars, unique. |
-| `name` | String | required | Heading displayed on status page. |
-| `monitorIds` | List\<String\> | required | IDs of monitors displayed on this page. |
-| `basicAuth` | Object? | `null` | Optional `{ "username": "...", "passwordHash": "..." }`. Argon2id hash. Protected pages show internal error logs. |
+| Field        | Type           | Default  | Description                                                                                                                                                                                                                                                                                         |
+|--------------|----------------|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `id`         | String         | required | Path component (`/status/<id>`). `[A-Za-z0-9_.-]`, 1–64 chars, unique.                                                                                                                                                                                                                              |
+| `name`       | String         | required | Heading displayed on status page.                                                                                                                                                                                                                                                                   |
+| `monitorIds` | List\<String\> | required | IDs of monitors displayed on this page.                                                                                                                                                                                                                                                             |
+| `basicAuth`  | Object?        | `null`   | Optional `{ "username": "...", "password": "..." }`. Plain text, like the SMTP passwords — keep `config.json` at `chmod 600`. Protected pages show internal error logs. Up to 0.1.0 this field was `passwordHash` (Argon2); such configs are rejected at start with `Field 'password' is required`. |
 
 ## Web endpoints
 
@@ -275,7 +266,8 @@ sudo systemctl daemon-reload && sudo systemctl enable --now argos.service
 ```
 
 - **Unprivileged execution**: `/usr/bin/ping` uses the `cap_net_raw` file capability; root is not required. Do not set `NoNewPrivileges=true` as it disables this capability.
-- **Reverse proxy**: Terminate TLS at a reverse proxy (e.g. Caddy, Zoraxy, nginx). Apply rate limiting to `/status/*` to protect Argon2 password verification.
+- **Reverse proxy**: Terminate TLS at a reverse proxy (e.g. Caddy, Zoraxy, nginx). Apply rate limiting to `/status/*` if
+  you want to slow down password guessing.
 - **Backups**: Backup `<dataDir>/argos.db` while running using `sqlite3 argos.db ".backup argos-backup.db"`.
 
 ## Not in scope (deliberately)

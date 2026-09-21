@@ -1,12 +1,6 @@
 package bayern.kickner.argos.config
 
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.*
 import kotnexlib.ResultOf2
 import java.io.File
 import java.net.InetAddress
@@ -52,9 +46,6 @@ private val methodPattern = Regex("[A-Za-z]{1,16}")
 /** `local@domain` or `Display Name <local@domain>`, no whitespace around the '@'. Jakarta Mail is the authority, this catches the typos. */
 private val emailPattern = Regex("(?:[^<>@]*<[^\\s<>@]+@[^\\s<>@]+>|[^\\s<>@]+@[^\\s<>@]+)")
 
-/** KotNexLib hashes are Base64 of `$argon2id$v=19$...`; the first 15 characters encode to this fixed prefix. */
-private val passwordHashPattern = Regex("JGFyZ29uMmlkJHY9MTkk[A-Za-z0-9+/]+={0,2}")
-
 private val ROOT_KEYS = setOf(
     "monitors", "smtpChannels", "webhookChannels", "statusPages", "retentionDays", "flappingThreshold",
     "heartbeatGapMinutesThreshold", "dataDir", "webHost", "webPort"
@@ -69,7 +60,7 @@ private val CHECK_KEYS = mapOf(
 private val SMTP_KEYS = setOf("id", "host", "port", "username", "password", "from", "to", "systemEvents", "tls")
 private val WEBHOOK_KEYS = setOf("id", "url", "method", "headers", "bodyTemplate", "systemEvents")
 private val STATUS_PAGE_KEYS = setOf("id", "name", "monitorIds", "basicAuth")
-private val BASIC_AUTH_KEYS = setOf("username", "passwordHash")
+private val BASIC_AUTH_KEYS = setOf("username", "password")
 
 /**
  * Loads and validates configuration from the provided JSON file path.
@@ -240,7 +231,7 @@ private fun validate(config: AppConfig): List<String> {
         if (unknownMonitors.isNotEmpty()) issues += "$owner: unknown monitorIds $unknownMonitors"
         page.basicAuth?.let { auth ->
             if (auth.username.isBlank()) issues += "$owner: basicAuth.username must not be blank"
-            if (passwordHashPattern.matches(auth.passwordHash).not()) issues += "$owner: basicAuth.passwordHash is not a hash produced by hashPassword="
+            if (auth.password.isBlank()) issues += "$owner: basicAuth.password must not be blank"
         }
     }
 

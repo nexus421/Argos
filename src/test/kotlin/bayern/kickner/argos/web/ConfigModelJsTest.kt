@@ -12,7 +12,6 @@ import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import kotlinx.serialization.json.Json
 import kotnexlib.ResultOf2
-import kotnexlib.crypto.Argon2Helper
 import org.graalvm.polyglot.Context
 import java.io.File
 
@@ -130,9 +129,17 @@ private val invalidCases = listOf(
     InvalidCase("SMTP recipient without @", config(smtpChannels = "[${smtp(to = """["ops"]""")}]"), "SMTP channel 'mail': 'to' contains an invalid e-mail address 'ops'"),
     InvalidCase("SMTP sender without @", config(smtpChannels = "[${smtp(from = "argos")}]"), "SMTP channel 'mail': 'from' is not a valid e-mail address"),
     InvalidCase("webhook url without scheme", config(webhookChannels = "[${webhook(url = "hooks.example/x")}]"), "Webhook channel 'hook': url must start with http:// or https://"),
-    InvalidCase("password hash that is not from hashPassword", config(statusPages = """[{"id":"p","name":"P","monitorIds":["m1"],"basicAuth":{"username":"admin","passwordHash":"secret"}}]"""), "Status page 'p': basicAuth.passwordHash is not a hash produced by hashPassword="),
+    InvalidCase(
+        "blank basicAuth password",
+        config(statusPages = """[{"id":"p","name":"P","monitorIds":["m1"],"basicAuth":{"username":"admin","password":" "}}]"""),
+        "Status page 'p': basicAuth.password must not be blank"
+    ),
     InvalidCase("unknown top-level field", config(globals = ""","retention":3"""), "Unknown field 'retention' in the top level"),
-    InvalidCase("misspelled basicAuth key", config(statusPages = """[{"id":"p","name":"P","monitorIds":["m1"],"basicauth":{"username":"admin","passwordHash":"x"}}]"""), "Unknown field 'basicauth' in statusPages[0]"),
+    InvalidCase(
+        "misspelled basicAuth key",
+        config(statusPages = """[{"id":"p","name":"P","monitorIds":["m1"],"basicauth":{"username":"admin","password":"x"}}]"""),
+        "Unknown field 'basicauth' in statusPages[0]"
+    ),
     InvalidCase("unknown field inside a check", config("[${monitor(check = """{"type":"tcp","host":"db","port":5432,"timeout":3}""")}]"), "Unknown field 'timeout' in monitors[0].check")
 )
 
@@ -144,11 +151,6 @@ class ConfigModelJsTest : FunSpec({
     test("the README example config passes the editor validation and the server") {
         js.validate(readmeExample).shouldBeEmpty()
         serverIssues(readmeExample).shouldBeEmpty()
-    }
-
-    test("the README example hash really is the documented password, so readers can log in to the example page") {
-        val hash = Regex(""""passwordHash":\s*"([^"]+)"""").find(readmeExample)!!.groupValues[1]
-        Argon2Helper.verify("change-me".toCharArray(), hash).getOrThrow() shouldBe true
     }
 
     test("a display name in an SMTP address is accepted on both sides") {

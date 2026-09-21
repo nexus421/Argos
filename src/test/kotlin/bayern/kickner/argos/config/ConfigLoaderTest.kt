@@ -1,7 +1,6 @@
 package bayern.kickner.argos.config
 
 import io.kotest.core.spec.style.FunSpec
-import bayern.kickner.argos.web.hashPassword
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldExist
@@ -224,8 +223,8 @@ class ConfigLoaderTest : FunSpec({
                               "check": { "type": "tcp", "host": "a", "port": 1, "timeout": 3 } } ],
               "smtpChannels": [ { "id": "c1", "host": "h", "port": 25, "username": "u", "password": "p", "from": "a@b", "to": ["x@y"], "tsl": "none" } ],
               "webhookChannels": [ { "id": "c2", "url": "https://h", "bodyTemplate": "{}", "header": {} } ],
-              "statusPages": [ { "id": "p", "name": "p", "monitorIds": ["m1"], "basicauth": { "username": "a", "passwordHash": "x" } },
-                               { "id": "q", "name": "q", "monitorIds": ["m1"], "basicAuth": { "username": "a", "passwordHash": "x", "pw": "y" } } ],
+              "statusPages": [ { "id": "p", "name": "p", "monitorIds": ["m1"], "basicauth": { "username": "a", "password": "x" } },
+                               { "id": "q", "name": "q", "monitorIds": ["m1"], "basicAuth": { "username": "a", "password": "x", "pw": "y" } } ],
               "retention": 3
             }"""
         )
@@ -275,11 +274,14 @@ class ConfigLoaderTest : FunSpec({
         issues.filter { it.contains("'c2'") }.shouldBeEmpty()
     }
 
-    test("rejects a passwordHash that was not produced by hashPassword= and accepts a real one") {
-        fun page(id: String, hash: String) = """{ "id": "$id", "name": "p", "monitorIds": [], "basicAuth": { "username": "admin", "passwordHash": "$hash" } }"""
-        val issues = issuesOf("""{ "statusPages": [ ${page("p1", "secret")}, ${page("p2", "${'$'}argon2id${'$'}v=19${'$'}m=65536,t=3,p=1${'$'}abc${'$'}def")}, ${page("p3", hashPassword("secret"))} ] }""")
-        issues shouldContain "Status page 'p1': basicAuth.passwordHash is not a hash produced by hashPassword="
-        issues shouldContain "Status page 'p2': basicAuth.passwordHash is not a hash produced by hashPassword="
+    test("rejects a blank basicAuth password and accepts a plain one") {
+        fun page(id: String, password: String) =
+            """{ "id": "$id", "name": "p", "monitorIds": [], "basicAuth": { "username": "admin", "password": "$password" } }"""
+
+        val issues =
+            issuesOf("""{ "statusPages": [ ${page("p1", "")}, ${page("p2", "  ")}, ${page("p3", "secret")} ] }""")
+        issues shouldContain "Status page 'p1': basicAuth.password must not be blank"
+        issues shouldContain "Status page 'p2': basicAuth.password must not be blank"
         issues.filter { it.contains("'p3'") }.shouldBeEmpty()
     }
 })

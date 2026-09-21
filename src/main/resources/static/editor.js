@@ -288,12 +288,12 @@
       (id, on) => { page.monitorIds = toggleIn(page.monitorIds, id, on); });
 
     const authToggle = el('input', { type: 'checkbox', checked: page.basicAuth !== null, onchange: (event) => {
-      page.basicAuth = event.target.checked ? { username: '', passwordHash: '' } : null;
+      page.basicAuth = event.target.checked ? { username: '', password: '' } : null;
       renderAll();
     } });
     const authFields = page.basicAuth === null ? [] : [
       textField(page.basicAuth, 'username', 'Username'),
-      textField(page.basicAuth, 'passwordHash', 'Password hash', 'Argon2id hash, never the password itself. Generate it with:  java -jar argos.jar hashPassword=yourSecret', { className: 'wide' })
+      passwordField(page.basicAuth, 'password', 'Password', 'Stored in plain text in config.json.')
     ];
 
     return card(page.name || `Status page ${index + 1}`, config.statusPages, index, 'Remove page',

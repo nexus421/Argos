@@ -11,16 +11,8 @@ import io.ktor.server.html.*
 import io.ktor.server.http.content.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.html.*
-import kotnexlib.crypto.Argon2Helper
-
-/**
- * Argon2 verification costs ~64 MiB heap and ~100 ms each. One at a time keeps the worst case at 64 MiB of the
- * 256 MiB heap and the work off the scheduler's Default dispatcher; rate-limit the status pages in the reverse proxy.
- */
-private val argonDispatcher = Dispatchers.IO.limitedParallelism(1)
+import java.security.MessageDigest
 
 private const val STATUS_PAGE_CSS = """
 :root { color-scheme: light dark; --bg: #fff; --fg: #222; --line: #ddd; --muted: #6b7280; --up: #1a7f37; --down: #b91c1c; }
@@ -123,7 +115,8 @@ private fun describe(error: ConfigError?): String {
 
 /**
  * Registers HTTP Basic Authentication providers for status pages requiring credentials.
- * The hash is always verified (also for a wrong username) so response timing does not reveal valid usernames.
+ * Both fields are compared in constant time and always both (non-short-circuit `and`), so response timing reveals
+ * neither a valid username nor how many password characters matched.
  */
 private fun Application.installBasicAuthProviders(config: AppConfig) {
     install(Authentication) {
@@ -132,10 +125,10 @@ private fun Application.installBasicAuthProviders(config: AppConfig) {
             basic("auth-${page.id}") {
                 realm = "Argos Status Page: ${page.name}"
                 validate { credentials ->
-                    val hashOk = withContext(argonDispatcher) {
-                        Argon2Helper.verify(credentials.password.toCharArray(), auth.passwordHash).getOrDefault(false)
-                    }
-                    if (credentials.name == auth.username && hashOk) UserIdPrincipal(credentials.name) else null
+                    val nameOk = MessageDigest.isEqual(credentials.name.toByteArray(), auth.username.toByteArray())
+                    val passwordOk =
+                        MessageDigest.isEqual(credentials.password.toByteArray(), auth.password.toByteArray())
+                    if (nameOk and passwordOk) UserIdPrincipal(credentials.name) else null
                 }
             }
         }

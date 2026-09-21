@@ -12,8 +12,6 @@ const ArgosConfigModel = (() => {
   const EMAIL_PATTERN = /^(?:[^<>@]*<[^\s<>@]+@[^\s<>@]+>|[^\s<>@]+@[^\s<>@]+)$/;
   // The server parses with InetAddress.ofLiteral; this approximation flags names and whitespace, not every bad octet
   const IP_LITERAL_PATTERN = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.%a-zA-Z0-9]*)$/;
-  // Base64 of "$argon2id$v=19$" — the fixed prefix of every hash printed by `hashPassword=`
-  const PASSWORD_HASH_PATTERN = /^JGFyZ29uMmlkJHY9MTkk[A-Za-z0-9+/]+={0,2}$/;
   const KNOWN_KEYS = {
     root: ['monitors', 'smtpChannels', 'webhookChannels', 'statusPages', 'retentionDays', 'flappingThreshold',
       'heartbeatGapMinutesThreshold', 'dataDir', 'webHost', 'webPort'],
@@ -27,7 +25,7 @@ const ArgosConfigModel = (() => {
     smtp: ['id', 'host', 'port', 'username', 'password', 'from', 'to', 'systemEvents', 'tls'],
     webhook: ['id', 'url', 'method', 'headers', 'bodyTemplate', 'systemEvents'],
     statusPage: ['id', 'name', 'monitorIds', 'basicAuth'],
-    basicAuth: ['username', 'passwordHash']
+    basicAuth: ['username', 'password']
   };
 
   const isBlank = (value) => String(value ?? '').trim() === '';
@@ -126,7 +124,7 @@ const ArgosConfigModel = (() => {
     const path = `statusPages[${index}]`;
     const page = asObject(raw, path);
     const auth = asObject(page.basicAuth, `${path}.basicAuth`, null);
-    const basicAuth = auth === null ? null : { ...auth, username: auth.username ?? '', passwordHash: auth.passwordHash ?? '' };
+    const basicAuth = auth === null ? null : { ...auth, username: auth.username ?? '', password: auth.password ?? '' };
     return { ...page, id: page.id ?? '', name: page.name ?? '', monitorIds: asList(page.monitorIds, `${path}.monitorIds`), basicAuth };
   }
 
@@ -297,7 +295,7 @@ const ArgosConfigModel = (() => {
       if (unknownMonitors.length > 0) issues.push(`${owner}: unknown monitorIds ${list(unknownMonitors)}`);
       if (page.basicAuth !== null) {
         if (isBlank(page.basicAuth.username)) issues.push(`${owner}: basicAuth.username must not be blank`);
-        if (PASSWORD_HASH_PATTERN.test(String(page.basicAuth.passwordHash)) === false) issues.push(`${owner}: basicAuth.passwordHash is not a hash produced by hashPassword=`);
+        if (isBlank(page.basicAuth.password)) issues.push(`${owner}: basicAuth.password must not be blank`);
       }
     });
 

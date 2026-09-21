@@ -15,7 +15,6 @@ import bayern.kickner.argos.selfmonitor.readLastHeartbeat
 import bayern.kickner.argos.selfmonitor.writeHeartbeat
 import bayern.kickner.argos.web.StatusService
 import bayern.kickner.argos.web.configureWeb
-import bayern.kickner.argos.web.hashPassword
 import bayern.kickner.klogger.KLogger
 import bayern.kickner.klogger.staticLog
 import io.ktor.server.engine.*
@@ -39,8 +38,7 @@ private const val NOTIFICATION_DRAIN_MILLIS = 30_000L
  * launches the scheduler loop, and binds the HTTP web server. Shutdown order: HTTP server, checks, alert
  * deliveries (bounded wait), heartbeat, database.
  *
- * @param args Command-line arguments: `configPath=<path>` (default `./config.json`) or
- * `hashPassword=<password>` to print an Argon2 hash for `statusPages[].basicAuth.passwordHash` and exit.
+ * @param args Command-line arguments: `configPath=<path>` (default `./config.json`).
  */
 fun main(args: Array<String>) {
     // Exposed writes SQLite timestamps as text in the JVM default zone. UTC keeps them sortable across DST changes
@@ -59,14 +57,7 @@ fun main(args: Array<String>) {
         minLevel = KLogger.Level.INFO
     }
 
-    val parsedArgs = ArgsInterpreter(args)
-    val passwordToHash = parsedArgs.getValue("hashPassword")
-    if (passwordToHash != null) {
-        println(hashPassword(passwordToHash))
-        return
-    }
-
-    val configPath = parsedArgs.getValue("configPath") ?: "./config.json"
+    val configPath = ArgsInterpreter(args).getValue("configPath") ?: "./config.json"
     val config = when (val result = loadConfig(configPath)) {
         is ResultOf2.Success -> result.value
         is ResultOf2.Failure -> {
